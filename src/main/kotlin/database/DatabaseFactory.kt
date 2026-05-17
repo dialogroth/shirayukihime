@@ -15,40 +15,25 @@ object DatabaseFactory {
 
     fun init(application: Application) {
 
-        val url = System.getenv("DATABASE_URL")
-            ?: application.environment.config.propertyOrNull("database.url")?.getString()
+        val rawUrl = System.getenv("DATABASE_URL")
             ?: error("DATABASE_URL is not set")
 
-        val driver = System.getenv("DATABASE_DRIVER")
-            ?: "org.postgresql.Driver"
-
-        val user = System.getenv("DATABASE_USER")
-            ?: ""
-
-        val password = System.getenv("DATABASE_PASSWORD")
-            ?: ""
-
-        val maxPoolSize = System.getenv("DATABASE_POOL_SIZE")
-            ?.toIntOrNull()
-            ?: 10
+        val jdbcUrl = convertToJdbcUrl(rawUrl)
 
         val hikariConfig = HikariConfig().apply {
-            jdbcUrl = if (url.startsWith("postgres://")) {
-                url.replace("postgres://", "jdbc:postgresql://")
-            } else {
-                url
-            }
+            driverClassName = "org.postgresql.Driver"
+            this.jdbcUrl = jdbcUrl
 
-            driverClassName = driver
-            username = user
-            this.password = password
-
-            maximumPoolSize = maxPoolSize
+            // Renderは基本これだけでOK
+            maximumPoolSize = 10
             isAutoCommit = false
             transactionIsolation = "TRANSACTION_REPEATABLE_READ"
+
+            validate()
         }
 
-        Database.connect(HikariDataSource(hikariConfig))
+        val dataSource = HikariDataSource(hikariConfig)
+        Database.connect(dataSource)
 
         transaction {
             SchemaUtils.createMissingTablesAndColumns(
@@ -57,6 +42,22 @@ object DatabaseFactory {
                 RoomCardSettings,
                 Players
             )
+        }
+    }
+
+    private fun convertToJdbcUrl(url: String): String {
+        return when {
+            url.startsWith("postgres://") ->
+                url.replace("postgres://", "jdbc:postgresql://")
+
+            url.startsWith("postgresql://") ->
+                url.replace("postgresql://", "jdbc:postgresql://")
+
+            url.startsWith("jdbc:postgresql://") ->
+                url
+
+            else ->
+                error("Invalid DATABASE_URL format: $url")
         }
     }
 }
