@@ -1,0 +1,13 @@
+ktor:
+  application:
+    modules:
+      - MainKt.module
+  deployment:
+    port: 8080
+
+database:
+  url: "jdbc:postgresql://localhost:5432/shirayukihime"
+  driver: "org.postgresql.Driver"
+  user: "postgres"
+  password: "password"
+  maxPoolSize: 10

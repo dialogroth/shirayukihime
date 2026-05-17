@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(psql --version 2>&1)",
+      "PowerShell(choco --version 2>&1)",
+      "PowerShell(scoop --version 2>&1)",
+      "PowerShell(winget --version 2>&1)",
+      "PowerShell(winget install Gradle.Gradle --accept-source-agreements --accept-package-agreements)",
+      "PowerShell(winget search gradle 2>&1)",
+      "Bash(.\\\\gradlew.bat compileKotlin)"
+    ]
+  }
+}
