@@ -119,14 +119,14 @@ function renderActions(gs) {
       gs.availableTargets.forEach(t => {
         const btn = document.createElement('button');
         btn.textContent = t.name || t.userName;
-        btn.onclick = () => sendEvent('SELECT_TARGET', { targetPlayerId: t.id });
+        btn.onclick = () => sendEvent('ACTION_USE_CARD', { targetPlayerId: t.id });
         container.appendChild(btn);
       });
     }
   } else {
     const btn = document.createElement('button');
     btn.textContent = 'カードを引く';
-    btn.onclick = () => sendEvent('DRAW_CARD', {});
+    btn.onclick = () => sendEvent('ACTION_DRAW_CARD', {});
     container.appendChild(btn);
   }
 }
@@ -240,7 +240,7 @@ document.getElementById('btn-do-join').onclick = async () => {
 };
 
 document.getElementById('btn-start-game').onclick = () => {
-  sendEvent('START_GAME', {});
+  sendEvent('GAME_START', {});
 };
 
 document.getElementById('btn-back-to-start').onclick = () => {
