@@ -7,28 +7,33 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 16px;
 }
-.screen { display: none; width: 100%; max-width: 420px; padding: 24px; text-align: center; }
+.screen { display: none; width: 100%; max-width: 480px; padding: 24px; text-align: center; }
 .screen.active { display: block; }
 h1 { font-size: 1.6rem; margin-bottom: 24px; }
 h2 { font-size: 1.3rem; margin-bottom: 16px; }
+h3 { font-size: 1.1rem; margin-bottom: 8px; }
 .card {
   background: #2a2a3e;
   border-radius: 12px;
-  padding: 24px;
+  padding: 20px;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  text-align: left;
 }
-label { font-size: 0.85rem; color: #9ca3af; text-align: left; }
-input {
+label { font-size: 0.85rem; color: #9ca3af; }
+input[type="text"], input[type="number"] {
   padding: 10px 12px;
   border-radius: 8px;
   border: 1px solid #444;
   background: #16162a;
   color: #fff;
   font-size: 1rem;
+  width: 100%;
 }
+input[type="number"] { width: 60px; }
 button {
   padding: 12px;
   border-radius: 8px;
@@ -39,28 +44,75 @@ button {
   cursor: pointer;
   font-weight: 600;
 }
-button:hover { background: #4f46e5; }
-button.btn-back { background: #444; }
-button.btn-back:hover { background: #555; }
+button:hover:not(:disabled) { background: #4f46e5; }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+button.btn-back, button.btn-secondary { background: #444; }
+button.btn-back:hover, button.btn-secondary:hover { background: #555; }
+button.btn-danger { background: #dc2626; }
+button.btn-danger:hover { background: #b91c1c; }
 .btn-group { display: flex; gap: 12px; }
 .btn-group button { flex: 1; }
 ul { list-style: none; text-align: left; }
-ul li { padding: 6px 0; border-bottom: 1px solid #333; }
+ul li { padding: 6px 0; border-bottom: 1px solid #333; display: flex; align-items: center; gap: 8px; }
 ul li:last-child { border-bottom: none; }
+.badge { font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; background: #6366f1; }
+.badge-host { background: #f59e0b; color: #000; }
+.badge-disconnected { background: #dc2626; }
+
+.checkbox-group { display: flex; flex-wrap: wrap; gap: 8px; }
+.checkbox-group label { display: flex; align-items: center; gap: 4px; font-size: 0.85rem; color: #e0e0e0; cursor: pointer; }
+
+.card-settings { display: flex; flex-direction: column; gap: 6px; }
+.card-setting-row { display: flex; align-items: center; justify-content: space-between; }
+.card-setting-row span { font-size: 0.85rem; }
+.card-setting-row input { width: 50px; text-align: center; }
 
 #game-header {
-  display: flex; justify-content: space-between; padding: 12px;
-  background: #2a2a3e; border-radius: 8px; margin-bottom: 12px;
+  display: flex; justify-content: space-between; align-items: center; padding: 12px;
+  background: #2a2a3e; border-radius: 8px; margin-bottom: 12px; font-size: 0.9rem;
+}
+#role-info {
+  background: #1a1a2e; border: 1px solid #6366f1; border-radius: 8px;
+  padding: 10px; margin-bottom: 12px; font-size: 0.85rem; text-align: center;
 }
 #game-players { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .player-chip {
-  background: #333; padding: 6px 12px; border-radius: 16px; font-size: 0.85rem;
+  background: #333; padding: 8px 12px; border-radius: 8px; font-size: 0.8rem;
+  display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 80px;
 }
-.player-chip.current { background: #6366f1; }
-.player-chip.dead { opacity: 0.4; text-decoration: line-through; }
-#game-center { background: #2a2a3e; border-radius: 8px; padding: 16px; margin-bottom: 12px; text-align: center; }
-#game-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
-#game-actions button { flex: 1; min-width: 100px; font-size: 0.85rem; padding: 10px; }
-#game-log { background: #16162a; border-radius: 8px; padding: 12px; max-height: 150px; overflow-y: auto; font-size: 0.8rem; color: #9ca3af; text-align: left; }
-#result-details { background: #2a2a3e; border-radius: 8px; padding: 16px; margin: 16px 0; text-align: left; }
+.player-chip.current { border: 2px solid #6366f1; }
+.player-chip.dead { opacity: 0.35; text-decoration: line-through; }
+.player-chip.protected { border: 2px solid #10b981; }
+.player-chip.disconnected { border: 2px dashed #dc2626; }
+.player-chip .pref-icons { font-size: 0.7rem; color: #9ca3af; }
+.player-chip .apple-status { font-size: 0.9rem; }
+
+#game-center {
+  background: #2a2a3e; border-radius: 8px; padding: 16px; margin-bottom: 12px;
+  display: flex; flex-direction: column; gap: 8px; align-items: center;
+}
+#my-hand { font-size: 0.9rem; padding: 8px; background: #16162a; border-radius: 6px; width: 100%; }
+#game-actions {
+  display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; justify-content: center;
+}
+#game-actions button { min-width: 100px; font-size: 0.85rem; padding: 10px; }
+
+#discard-pile-toggle { text-align: center; margin-bottom: 8px; }
+#discard-pile {
+  background: #16162a; border-radius: 8px; padding: 12px; margin-bottom: 12px;
+  max-height: 120px; overflow-y: auto; font-size: 0.8rem; color: #9ca3af;
+}
+
+#game-log {
+  background: #16162a; border-radius: 8px; padding: 12px;
+  max-height: 120px; overflow-y: auto; font-size: 0.75rem; color: #6b7280; text-align: left;
+}
+
+#ending-content { min-height: 100px; }
+#ending-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+#result-details { text-align: left; }
+#result-details .result-player { padding: 6px 0; border-bottom: 1px solid #333; display: flex; justify-content: space-between; }
+#result-details .result-player:last-child { border-bottom: none; }
+.winner-badge { color: #f59e0b; }
 

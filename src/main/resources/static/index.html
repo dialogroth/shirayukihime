@@ -15,8 +15,8 @@
     <label>ユーザー名</label>
     <input type="text" id="input-username" maxlength="12" placeholder="名前を入力（1〜12文字）">
     <div class="btn-group">
-      <button id="btn-create-room">部屋を作る</button>
-      <button id="btn-join-room">部屋に入る</button>
+      <button id="btn-create-room" disabled>部屋を作る</button>
+      <button id="btn-join-room" disabled>部屋に入る</button>
     </div>
   </div>
 </section>
@@ -27,7 +27,39 @@
   <div class="card">
     <label>毒リンゴの数</label>
     <input type="number" id="input-poison-count" value="2" min="1" max="5">
-    <button id="btn-do-create">作成</button>
+
+    <label>役職の選択</label>
+    <div id="role-checkboxes" class="checkbox-group">
+      <label><input type="checkbox" value="SNOW_WHITE" checked disabled> 白雪姫</label>
+      <label><input type="checkbox" value="QUEEN" checked disabled> 女王</label>
+      <label><input type="checkbox" value="GREEN" checked> グリーン</label>
+      <label><input type="checkbox" value="BLACK" checked> ブラック</label>
+      <label><input type="checkbox" value="BROWN"> ブラウン</label>
+      <label><input type="checkbox" value="GRAY"> グレイ</label>
+      <label><input type="checkbox" value="NAVY"> ネイビー</label>
+      <label><input type="checkbox" value="ROSE"> ロゼ</label>
+      <label><input type="checkbox" value="LIGHT"> ライト</label>
+    </div>
+
+    <label>カード枚数設定</label>
+    <div id="card-settings" class="card-settings">
+      <div class="card-setting-row"><span>リンゴは好き？</span><input type="number" data-card="APPLE_QUESTION" value="5" min="0" max="10"></div>
+      <div class="card-setting-row"><span>きのこは好き？</span><input type="number" data-card="MUSHROOM_QUESTION" value="5" min="0" max="10"></div>
+      <div class="card-setting-row"><span>いただきます。</span><input type="number" data-card="ITADAKIMASU" value="3" min="0" max="5"></div>
+      <div class="card-setting-row"><span>アップルルーレット！</span><input type="number" data-card="ROULETTE_1" value="1" min="0" max="3"></div>
+      <div class="card-setting-row"><span>アップルルーレット！！</span><input type="number" data-card="ROULETTE_2" value="1" min="0" max="3"></div>
+      <div class="card-setting-row"><span>アップルルーレット！！！</span><input type="number" data-card="ROULETTE_3" value="1" min="0" max="3"></div>
+      <div class="card-setting-row"><span>包丁</span><input type="number" data-card="KNIFE" value="1" min="0" max="3"></div>
+      <div class="card-setting-row"><span>呪いの指輪</span><input type="number" data-card="CURSED_RING" value="1" min="0" max="3"></div>
+      <div class="card-setting-row"><span>毒の櫛</span><input type="number" data-card="POISON_COMB" value="1" min="0" max="3"></div>
+      <div class="card-setting-row"><span>騎士</span><input type="number" data-card="KNIGHT" value="1" min="0" max="3"></div>
+      <div class="card-setting-row"><span>ガード</span><input type="number" data-card="GUARD" value="1" min="0" max="3"></div>
+      <div class="card-setting-row"><span>ロープ</span><input type="number" data-card="ROPE" value="1" min="0" max="3"></div>
+      <div class="card-setting-row"><span>プレゼント交換</span><input type="number" data-card="PRESENT_EXCHANGE" value="1" min="0" max="3"></div>
+    </div>
+    <button id="btn-reset-cards" class="btn-secondary">デフォルトに戻す</button>
+
+    <button id="btn-do-create">ルームを作成する</button>
     <button class="btn-back" data-back="start">戻る</button>
   </div>
 </section>
@@ -37,8 +69,8 @@
   <h2>ルームに参加</h2>
   <div class="card">
     <label>ルームコード</label>
-    <input type="text" id="input-room-code" maxlength="6" placeholder="コードを入力">
-    <button id="btn-do-join">参加</button>
+    <input type="text" id="input-room-code" maxlength="6" placeholder="6桁のコードを入力">
+    <button id="btn-do-join">参加する</button>
     <button class="btn-back" data-back="start">戻る</button>
   </div>
 </section>
@@ -47,10 +79,11 @@
 <section id="screen-waiting" class="screen">
   <h2>ルーム: <span id="display-room-code"></span></h2>
   <div class="card">
-    <h3>参加者</h3>
+    <h3>参加者 (<span id="player-count">0</span>人)</h3>
     <ul id="player-list"></ul>
-    <button id="btn-start-game" style="display:none;">ゲーム開始</button>
+    <button id="btn-start-game" style="display:none;" disabled>ゲーム開始</button>
     <p id="waiting-msg">ホストがゲームを開始するのを待っています…</p>
+    <button id="btn-disband" class="btn-danger">ルームを解散する</button>
   </div>
 </section>
 
@@ -59,21 +92,46 @@
   <div id="game-header">
     <span id="phase-label">ストーリーフェイズ</span>
     <span id="turn-label"></span>
+    <span id="timer-label"></span>
   </div>
+
+  <div id="role-info"></div>
+
   <div id="game-players"></div>
+
   <div id="game-center">
     <div id="my-apple"></div>
     <div id="deck-info"></div>
+    <div id="my-hand"></div>
   </div>
+
   <div id="game-actions"></div>
+
+  <div id="discard-pile-toggle">
+    <button id="btn-show-discard" class="btn-secondary">捨て山を見る</button>
+  </div>
+  <div id="discard-pile" style="display:none;"></div>
+
   <div id="game-log"></div>
+</section>
+
+<!-- エンディング画面 -->
+<section id="screen-ending" class="screen">
+  <h2>エンディングフェイズ</h2>
+  <div class="card">
+    <div id="ending-content"></div>
+    <div id="ending-actions"></div>
+  </div>
 </section>
 
 <!-- 勝敗画面 -->
 <section id="screen-result" class="screen">
   <h2 id="result-title"></h2>
-  <div id="result-details"></div>
-  <button id="btn-back-to-start">スタートに戻る</button>
+  <div id="result-details" class="card"></div>
+  <div class="btn-group">
+    <button id="btn-rematch" style="display:none;">もう一度遊ぶ</button>
+    <button id="btn-disband-result" class="btn-danger">ルームを解散する</button>
+  </div>
 </section>
 
 <script src="app.js"></script>

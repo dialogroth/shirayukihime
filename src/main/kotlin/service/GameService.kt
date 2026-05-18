@@ -21,7 +21,7 @@ class GameService(
     private val turnTimerJobs = mutableMapOf<UUID, Job>()
     private val preferenceTimerJobs = mutableMapOf<UUID, Job>()
     private val queenExchangeTimerJobs = mutableMapOf<UUID, Job>()
-    private val disconnectTimerJobs = mutableMapOf<UUID, Job>()
+    private val disconnectTimerJobs = mutableMapOf<UUID, Job>() // playerId -> Job
     // roomId -> playerId currently waiting for preference response
     private val pendingPreference = mutableMapOf<UUID, Pair<UUID, String>>()
     // roomId -> waiting for queen exchange
@@ -157,6 +157,7 @@ class GameService(
             broadcastGameStateSync(roomId, updated)
             advanceTurn(roomId)
             return
+            // 注：グレイの保護はスキップされた手番では解除されない（要件通り）
         }
 
         // グレイの保護リセット（スキップされなかった本来の手番開始時）
@@ -172,7 +173,7 @@ class GameService(
                 delay(60_000)
                 handleDisconnectTimeout(roomId, currentPlayerId)
             }
-            disconnectTimerJobs[roomId] = job
+            disconnectTimerJobs[currentPlayerId] = job
             return
         }
 
@@ -192,9 +193,7 @@ class GameService(
     }
 
     private suspend fun advanceStoryTurn(roomId: UUID, state: GameState) {
-        if (state.deckOrder.isEmpty()) {
-            // 山札が尽きた場合はすでにLAST_TURNに移行済みのはず
-        }
+        // 山札が尽きた場合はすでにLAST_TURNに移行済み（handleDrawCard / handleItadakimasuで処理）
         val nextIndex = nextAliveIndex(state, state.currentTurnIndex)
         val newState = GameStateManager.update(roomId) { it.copy(currentTurnIndex = nextIndex) } ?: return
         startTurn(roomId)
@@ -328,9 +327,16 @@ class GameService(
         sendGameStateSyncTo(roomId, playerId, newState)
         broadcastGameStateSyncExcept(roomId, playerId, newState)
 
-        // 山札が尽きたらLAST_TURNへ
+        // 山札が尽きたらLAST_TURNへ（ただしカード使用/廃棄はまだ待つ）
         if (newState.deckOrder.isEmpty()) {
-            transitionToLastTurn(roomId, playerId)
+            GameStateManager.update(roomId) { s ->
+                s.copy(
+                    phase = GamePhase.LAST_TURN,
+                    lastTurnStartPlayerIndex = s.currentTurnIndex
+                )
+            }
+            broadcast(roomId, EventType.PHASE_CHANGED, PhaseChangedPayload("LAST_TURN", playerId.toString()))
+            startTurnTimer(roomId, playerId)
         } else {
             startTurnTimer(roomId, playerId)
         }
@@ -682,8 +688,9 @@ class GameService(
         val state = GameStateManager.get(roomId) ?: return
         val player = state.players[targetId] ?: return
         val autoAnswer = when (player.role) {
-            Role.SNOW_WHITE, Role.QUEEN, Role.BROWN, Role.LIGHT -> if (questionType == "APPLE") true else questionType != "MUSHROOM"
-            Role.GREEN, Role.BLACK, Role.GRAY -> if (questionType == "MUSHROOM") true else false
+            Role.SNOW_WHITE, Role.QUEEN, Role.LIGHT -> questionType == "APPLE"
+            Role.GREEN, Role.BLACK, Role.GRAY -> questionType == "MUSHROOM"
+            Role.BROWN -> true
             Role.ROSE -> false
             Role.NAVY -> listOf(true, false).random()
         }
@@ -907,7 +914,6 @@ class GameService(
         val state = GameStateManager.get(roomId)
         val player = state?.players?.get(playerId) ?: return
 
-        connectionManager.removeSession(roomId, playerId)
         playerRepository.updateConnected(playerId, false)
 
         if (state.phase == GamePhase.FINISHED) return
@@ -921,17 +927,18 @@ class GameService(
 
         if (state.currentTurnPlayerId() == playerId) {
             // 手番中の切断 → 1分タイマーはstartTurnで管理
-        } else if (player.role == Role.SNOW_WHITE) {
+        } else {
+            // 手番外での切断 → 1分タイマー開始（白雪姫も含む全員対象）
             val job = scope.launch {
                 delay(60_000)
                 handleDisconnectTimeout(roomId, playerId)
             }
-            disconnectTimerJobs[roomId] = job
+            disconnectTimerJobs[playerId] = job
         }
     }
 
     suspend fun handlePlayerReconnect(roomId: UUID, playerId: UUID) {
-        disconnectTimerJobs.remove(roomId)?.cancel()
+        disconnectTimerJobs.remove(playerId)?.cancel()
         playerRepository.updateConnected(playerId, true)
 
         val state = GameStateManager.update(roomId) { s ->
