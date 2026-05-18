@@ -315,7 +315,7 @@ function renderPlayers(players) {
 // === Render Apple ===
 function renderMyApple() {
   const el = document.getElementById('my-apple');
-  if (state.myApple) {
+  if (state.myApple && state.myApple.isPoisoned !== null && state.myApple.isPoisoned !== undefined) {
     el.textContent = state.myApple.isPoisoned ? '🍎 あなたのリンゴ: 毒リンゴ' : '🍏 あなたのリンゴ: 安全';
   } else {
     el.textContent = '🔮 あなたのリンゴ: 不明';
@@ -325,7 +325,7 @@ function renderMyApple() {
 function updateAppleDisplay(apples) {
   const myApple = apples.find(a => a.currentHolderPlayerId === state.playerId);
   if (myApple) {
-    if (myApple.isPubliclyRevealed || myApple.isPoisoned !== null) {
+    if (myApple.isPubliclyRevealed || (myApple.isPoisoned !== null && myApple.isPoisoned !== undefined)) {
       state.myApple = myApple;
     } else {
       state.myApple = null;
