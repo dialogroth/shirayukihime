@@ -1,0 +1,66 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, 'Hiragino Sans', 'Yu Gothic', sans-serif;
+  background: #1e1e2e;
+  color: #e0e0e0;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.screen { display: none; width: 100%; max-width: 420px; padding: 24px; text-align: center; }
+.screen.active { display: block; }
+h1 { font-size: 1.6rem; margin-bottom: 24px; }
+h2 { font-size: 1.3rem; margin-bottom: 16px; }
+.card {
+  background: #2a2a3e;
+  border-radius: 12px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+label { font-size: 0.85rem; color: #9ca3af; text-align: left; }
+input {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #444;
+  background: #16162a;
+  color: #fff;
+  font-size: 1rem;
+}
+button {
+  padding: 12px;
+  border-radius: 8px;
+  border: none;
+  background: #6366f1;
+  color: #fff;
+  font-size: 1rem;
+  cursor: pointer;
+  font-weight: 600;
+}
+button:hover { background: #4f46e5; }
+button.btn-back { background: #444; }
+button.btn-back:hover { background: #555; }
+.btn-group { display: flex; gap: 12px; }
+.btn-group button { flex: 1; }
+ul { list-style: none; text-align: left; }
+ul li { padding: 6px 0; border-bottom: 1px solid #333; }
+ul li:last-child { border-bottom: none; }
+
+#game-header {
+  display: flex; justify-content: space-between; padding: 12px;
+  background: #2a2a3e; border-radius: 8px; margin-bottom: 12px;
+}
+#game-players { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.player-chip {
+  background: #333; padding: 6px 12px; border-radius: 16px; font-size: 0.85rem;
+}
+.player-chip.current { background: #6366f1; }
+.player-chip.dead { opacity: 0.4; text-decoration: line-through; }
+#game-center { background: #2a2a3e; border-radius: 8px; padding: 16px; margin-bottom: 12px; text-align: center; }
+#game-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+#game-actions button { flex: 1; min-width: 100px; font-size: 0.85rem; padding: 10px; }
+#game-log { background: #16162a; border-radius: 8px; padding: 12px; max-height: 150px; overflow-y: auto; font-size: 0.8rem; color: #9ca3af; text-align: left; }
+#result-details { background: #2a2a3e; border-radius: 8px; padding: 16px; margin: 16px 0; text-align: left; }
+

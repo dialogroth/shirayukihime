@@ -1,6 +1,7 @@
 package plugins
 
 import io.ktor.server.application.*
+import io.ktor.server.http.content.*
 import io.ktor.server.routing.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -22,6 +23,7 @@ fun Application.configureRouting() {
     val gameService = GameService(connectionManager, roomRepository, playerRepository, appScope)
 
     routing {
+        staticResources("/", "static", index = "index.html")
         roomRoutes(roomService, roomRepository, playerRepository)
         webSocketRoutes(connectionManager, gameService, roomRepository, playerRepository)
     }

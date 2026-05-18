@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>白雪姫のアップルルーレット</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- スタート画面 -->
+<section id="screen-start" class="screen active">
+  <h1>🍎 白雪姫のアップルルーレット</h1>
+  <div class="card">
+    <label>ユーザー名</label>
+    <input type="text" id="input-username" maxlength="12" placeholder="名前を入力（1〜12文字）">
+    <div class="btn-group">
+      <button id="btn-create-room">部屋を作る</button>
+      <button id="btn-join-room">部屋に入る</button>
+    </div>
+  </div>
+</section>
+
+<!-- ルーム作成画面 -->
+<section id="screen-create" class="screen">
+  <h2>ルーム作成</h2>
+  <div class="card">
+    <label>毒リンゴの数</label>
+    <input type="number" id="input-poison-count" value="2" min="1" max="5">
+    <button id="btn-do-create">作成</button>
+    <button class="btn-back" data-back="start">戻る</button>
+  </div>
+</section>
+
+<!-- ルーム参加画面 -->
+<section id="screen-join" class="screen">
+  <h2>ルームに参加</h2>
+  <div class="card">
+    <label>ルームコード</label>
+    <input type="text" id="input-room-code" maxlength="6" placeholder="コードを入力">
+    <button id="btn-do-join">参加</button>
+    <button class="btn-back" data-back="start">戻る</button>
+  </div>
+</section>
+
+<!-- ルーム待機画面 -->
+<section id="screen-waiting" class="screen">
+  <h2>ルーム: <span id="display-room-code"></span></h2>
+  <div class="card">
+    <h3>参加者</h3>
+    <ul id="player-list"></ul>
+    <button id="btn-start-game" style="display:none;">ゲーム開始</button>
+    <p id="waiting-msg">ホストがゲームを開始するのを待っています…</p>
+  </div>
+</section>
+
+<!-- ゲームメイン画面 -->
+<section id="screen-game" class="screen">
+  <div id="game-header">
+    <span id="phase-label">ストーリーフェイズ</span>
+    <span id="turn-label"></span>
+  </div>
+  <div id="game-players"></div>
+  <div id="game-center">
+    <div id="my-apple"></div>
+    <div id="deck-info"></div>
+  </div>
+  <div id="game-actions"></div>
+  <div id="game-log"></div>
+</section>
+
+<!-- 勝敗画面 -->
+<section id="screen-result" class="screen">
+  <h2 id="result-title"></h2>
+  <div id="result-details"></div>
+  <button id="btn-back-to-start">スタートに戻る</button>
+</section>
+
+<script src="app.js"></script>
+</body>
+</html>
+
