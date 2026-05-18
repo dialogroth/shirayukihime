@@ -590,7 +590,7 @@ class GameService(
                 "CLOCKWISE" -> (aliveIdx + steps) % n
                 else -> (aliveIdx - steps + n) % n
             }
-            apple.copy(currentHolderPlayerId = alivePlayers[newIdx].playerId)
+            apple.copy(currentHolderPlayerId = alivePlayers[newIdx].playerId, privatelyKnownBy = emptySet())
         }
 
         GameStateManager.update(roomId) { it.copy(apples = shiftedApples) }
@@ -1005,8 +1005,8 @@ class GameService(
         GameStateManager.update(roomId) { s ->
             val updatedApples = s.apples.map { apple ->
                 when (apple.currentHolderPlayerId) {
-                    playerA -> apple.copy(currentHolderPlayerId = playerB)
-                    playerB -> apple.copy(currentHolderPlayerId = playerA)
+                    playerA -> apple.copy(currentHolderPlayerId = playerB, privatelyKnownBy = emptySet())
+                    playerB -> apple.copy(currentHolderPlayerId = playerA, privatelyKnownBy = emptySet())
                     else -> apple
                 }
             }

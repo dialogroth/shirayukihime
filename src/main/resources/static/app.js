@@ -145,12 +145,18 @@ function handleServerEvent(msg) {
       break;
     case 'NOTIFY_EXCHANGE_APPLE':
       log(`${getPlayerName(payload.playerIdA)} と ${getPlayerName(payload.playerIdB)} がリンゴを交換しました`);
+      if (payload.playerIdA === state.playerId || payload.playerIdB === state.playerId) {
+        state.myApple = null;
+        renderMyApple();
+      }
       break;
     case 'NOTIFY_APPLE_PUBLICLY_REVEALED':
       log(`${getPlayerName(payload.holderPlayerId)} のリンゴが公開されました: ${payload.isPoisoned ? '🍎毒' : '🍏安全'}`);
       break;
     case 'NOTIFY_ROULETTE':
       log(`アップルルーレット! ${payload.direction === 'CLOCKWISE' ? '時計回り' : '反時計回り'}に${payload.steps}個移動`);
+      state.myApple = null;
+      renderMyApple();
       break;
     case 'NOTIFY_PREFERENCE_ANSWERED':
       const qType = payload.questionType === 'APPLE' ? 'リンゴ' : 'きのこ';
@@ -240,6 +246,10 @@ function handleGameStateSync(payload) {
 
 // === Turn Changed ===
 function handleTurnChanged(payload) {
+  if (state.gameState) {
+    state.gameState.currentTurnPlayerId = payload.currentTurnPlayerId;
+    if (state.gameState.players) renderPlayers(state.gameState.players);
+  }
   const name = getPlayerName(payload.currentTurnPlayerId);
   document.getElementById('turn-label').textContent =
     payload.currentTurnPlayerId === state.playerId ? '🎯 あなたのターン' : `${name} のターン`;
@@ -597,8 +607,9 @@ function showGameResult(payload) {
 
 // === Helpers ===
 function getPlayerName(playerId) {
-  if (!state.gameState?.players) return playerId?.substring(0, 6) || '???';
-  const p = state.gameState.players.find(p => p.playerId === playerId);
+  const players = state.gameState?.players || state.players;
+  if (!players) return playerId?.substring(0, 6) || '???';
+  const p = players.find(p => p.playerId === playerId);
   return p?.userName || playerId?.substring(0, 6) || '???';
 }
 
@@ -736,7 +747,7 @@ document.getElementById('btn-disband-result').onclick = () => { resetAndGoHome()
 function resetAndGoHome() {
   if (state.ws) state.ws.close();
   if (state.pollInterval) clearInterval(state.pollInterval);
-  state = { screen: 'start', username: '', roomId: '', roomCode: '', playerId: '', isHost: false, ws: null, role: null, faction: null, myApple: null, myHand: [], gameState: null, initialInfo: null, selectedRoles: [], pollInterval: null };
+  state = { screen: 'start', username: '', roomId: '', roomCode: '', playerId: '', isHost: false, ws: null, role: null, faction: null, myApple: null, myHand: [], gameState: null, initialInfo: null, selectedRoles: [], pollInterval: null, players: [] };
   showScreen('start');
 }
 
