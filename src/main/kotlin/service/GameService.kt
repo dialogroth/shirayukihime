@@ -29,11 +29,26 @@ class GameService(
 
     // ── ゲーム初期化 ──────────────────────────────────────────────────
 
-    suspend fun initGame(roomId: UUID) {
-        val settings = roomRepository.findSettings(roomId) ?: error("Settings not found")
+    suspend fun initGame(roomId: UUID, hostPlayerId: UUID? = null) {
+        val settings = roomRepository.findSettings(roomId)
+        if (settings == null) {
+            if (hostPlayerId != null) sendError(roomId, hostPlayerId, "SETTINGS_NOT_FOUND", "ルーム設定が見つかりません")
+            return
+        }
         val players = playerRepository.findByRoomId(roomId)
 
+        if (players.isEmpty()) {
+            if (hostPlayerId != null) sendError(roomId, hostPlayerId, "NO_PLAYERS", "プレイヤーがいません")
+            return
+        }
+
         val roles = settings.roles.map { Role.valueOf(it) }.shuffled()
+        if (roles.size != players.size) {
+            if (hostPlayerId != null) sendError(roomId, hostPlayerId, "PLAYER_ROLE_MISMATCH",
+                "プレイヤー数(${players.size})と役職数(${roles.size})が一致しません")
+            return
+        }
+
         val gamePlayers = players.mapIndexed { i, p ->
             val role = roles[i]
             GamePlayer(

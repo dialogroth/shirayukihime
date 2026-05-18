@@ -69,7 +69,16 @@ fun Route.webSocketRoutes(
                 if (frame is Frame.Text) {
                     val text = frame.readText()
                     val clientMsg = runCatching { Json.decodeFromString<ClientMessage>(text) }.getOrNull() ?: continue
-                    handleClientMessage(roomId, playerId, clientMsg, connectionManager, gameService, roomRepository)
+                    try {
+                        handleClientMessage(roomId, playerId, clientMsg, connectionManager, gameService, roomRepository)
+                    } catch (e: Exception) {
+                        println("Error handling client message: ${e.message}")
+                        e.printStackTrace()
+                        val errorMsg = WsMessage(EventType.ERROR, Json.encodeToJsonElement(
+                            mapOf("code" to "INTERNAL_ERROR", "message" to (e.message ?: "内部エラーが発生しました"))
+                        ))
+                        connectionManager.sendTo(roomId, playerId, errorMsg)
+                    }
                 }
             }
         } finally {
@@ -102,7 +111,7 @@ private suspend fun handleClientMessage(
         ClientEventType.GAME_START -> {
             val room = roomRepository.findById(roomId) ?: return
             if (room.hostPlayerId != playerId) return
-            gameService.initGame(roomId)
+            gameService.initGame(roomId, playerId)
         }
 
         ClientEventType.REMATCH_REQUEST -> {

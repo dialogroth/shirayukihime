@@ -188,6 +188,7 @@ function handleServerEvent(msg) {
       break;
     case 'ERROR':
       log(`❌ エラー: ${payload.message}`);
+      alert(`エラー: ${payload.message}`);
       break;
     default:
       log(`[未処理] ${type}: ${JSON.stringify(payload)}`);
@@ -635,7 +636,7 @@ async function pollRoom() {
     if (state.isHost) {
       const roleCount = state.selectedRoles.length;
       const btn = document.getElementById('btn-start-game');
-      btn.disabled = data.players.length < 4 || (roleCount > 0 && data.players.length !== roleCount);
+      btn.disabled = roleCount === 0 || data.players.length !== roleCount;
     }
   } catch(e) { console.error(e); }
 }
