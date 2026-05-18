@@ -155,8 +155,6 @@ function handleServerEvent(msg) {
       break;
     case 'NOTIFY_ROULETTE':
       log(`アップルルーレット! ${payload.direction === 'CLOCKWISE' ? '時計回り' : '反時計回り'}に${payload.steps}個移動`);
-      state.myApple = null;
-      renderMyApple();
       break;
     case 'NOTIFY_PREFERENCE_ANSWERED':
       const qType = payload.questionType === 'APPLE' ? 'リンゴ' : 'きのこ';
@@ -299,7 +297,7 @@ function renderPlayers(players) {
     let appleIcon = '🔮'; // unknown
     if (state.gameState && state.gameState.apples) {
       const apple = state.gameState.apples.find(a => a.currentHolderPlayerId === p.playerId);
-      if (apple && apple.isPubliclyRevealed) appleIcon = apple.isPoisoned ? '🍎' : '🍏';
+      if (apple && apple.isPoisoned !== null && apple.isPoisoned !== undefined) appleIcon = apple.isPoisoned ? '🍎' : '🍏';
     }
 
     let roleLabel = '';
@@ -325,10 +323,13 @@ function renderMyApple() {
 }
 
 function updateAppleDisplay(apples) {
-  // Update myApple if publicly revealed
   const myApple = apples.find(a => a.currentHolderPlayerId === state.playerId);
-  if (myApple && (myApple.isPubliclyRevealed || myApple.isPoisoned !== null)) {
-    state.myApple = myApple;
+  if (myApple) {
+    if (myApple.isPubliclyRevealed || myApple.isPoisoned !== null) {
+      state.myApple = myApple;
+    } else {
+      state.myApple = null;
+    }
     renderMyApple();
   }
 }

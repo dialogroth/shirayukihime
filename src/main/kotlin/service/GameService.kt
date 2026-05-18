@@ -590,7 +590,7 @@ class GameService(
                 "CLOCKWISE" -> (aliveIdx + steps) % n
                 else -> (aliveIdx - steps + n) % n
             }
-            apple.copy(currentHolderPlayerId = alivePlayers[newIdx].playerId, privatelyKnownBy = emptySet())
+            apple.copy(currentHolderPlayerId = alivePlayers[newIdx].playerId)
         }
 
         GameStateManager.update(roomId) { it.copy(apples = shiftedApples) }
@@ -1005,8 +1005,8 @@ class GameService(
         GameStateManager.update(roomId) { s ->
             val updatedApples = s.apples.map { apple ->
                 when (apple.currentHolderPlayerId) {
-                    playerA -> apple.copy(currentHolderPlayerId = playerB, privatelyKnownBy = emptySet())
-                    playerB -> apple.copy(currentHolderPlayerId = playerA, privatelyKnownBy = emptySet())
+                    playerA -> apple.copy(currentHolderPlayerId = playerB)
+                    playerB -> apple.copy(currentHolderPlayerId = playerA)
                     else -> apple
                 }
             }
@@ -1061,8 +1061,9 @@ class GameService(
 
     private suspend fun sendGameStateSyncTo(roomId: UUID, playerId: UUID, state: GameState) {
         val myHand = state.handOf(playerId).map { CardInfo(it.cardId.toString(), it.cardType.name) }
+        val isBlack = state.players[playerId]?.role == Role.BLACK
         val apples = state.apples.map { apple ->
-            val knownPoison = apple.isPubliclyRevealed ||
+            val knownPoison = isBlack || apple.isPubliclyRevealed ||
                     apple.privatelyKnownBy.contains(playerId)
             AppleSummary(
                 appleId = apple.appleId.toString(),
