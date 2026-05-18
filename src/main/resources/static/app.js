@@ -232,7 +232,9 @@ function handleGameStateSync(payload) {
   if (payload.currentTurnPlayerId === state.playerId) {
     renderTurnActions();
   } else {
-    document.getElementById('game-actions').innerHTML = '';
+    const actionsEl = document.getElementById('game-actions');
+    const turnPlayerName = getPlayerName(payload.currentTurnPlayerId);
+    actionsEl.innerHTML = `<div style="text-align:center;color:#aaa;padding:12px;">🕐 ${turnPlayerName} のターンです。お待ちください…</div>`;
   }
 }
 
@@ -245,7 +247,9 @@ function handleTurnChanged(payload) {
   if (payload.currentTurnPlayerId === state.playerId) {
     renderTurnActions();
   } else {
-    document.getElementById('game-actions').innerHTML = '';
+    const actionsEl = document.getElementById('game-actions');
+    const turnPlayerName = getPlayerName(payload.currentTurnPlayerId);
+    actionsEl.innerHTML = `<div style="text-align:center;color:#aaa;padding:12px;">🕐 ${turnPlayerName} のターンです。お待ちください…</div>`;
   }
 }
 
@@ -286,7 +290,6 @@ function renderPlayers(players) {
     if (state.gameState && state.gameState.apples) {
       const apple = state.gameState.apples.find(a => a.currentHolderPlayerId === p.playerId);
       if (apple && apple.isPubliclyRevealed) appleIcon = apple.isPoisoned ? '🍎' : '🍏';
-      else if (apple && apple.isPoisoned !== null && apple.isPoisoned !== undefined) appleIcon = apple.isPoisoned ? '🍎' : '🍏';
     }
 
     let roleLabel = '';
@@ -725,7 +728,8 @@ document.getElementById('btn-rematch').onclick = () => {
   sendEvent('REMATCH_REQUEST', {});
 };
 
-document.getElementById('btn-back-to-start').onclick = () => { resetAndGoHome(); };
+const btnBackToStart = document.getElementById('btn-back-to-start');
+if (btnBackToStart) btnBackToStart.onclick = () => { resetAndGoHome(); };
 document.getElementById('btn-disband').onclick = () => { resetAndGoHome(); };
 document.getElementById('btn-disband-result').onclick = () => { resetAndGoHome(); };
 

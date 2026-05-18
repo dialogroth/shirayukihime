@@ -37,21 +37,23 @@ class ConnectionManager {
         sessions[roomId]?.toMap() ?: emptyMap()
 
     suspend fun sendTo(roomId: UUID, playerId: UUID, message: WsMessage) {
-        getSession(roomId, playerId)?.send(Frame.Text(Json.encodeToString(message)))
+        runCatching {
+            getSession(roomId, playerId)?.send(Frame.Text(Json.encodeToString(message)))
+        }
     }
 
     suspend fun broadcast(roomId: UUID, message: WsMessage) {
-        val text = Frame.Text(Json.encodeToString(message))
+        val jsonText = Json.encodeToString(message)
         getSessionsInRoom(roomId).values.forEach { session ->
-            runCatching { session.send(text) }
+            runCatching { session.send(Frame.Text(jsonText)) }
         }
     }
 
     suspend fun broadcastExcept(roomId: UUID, excludePlayerId: UUID, message: WsMessage) {
-        val text = Frame.Text(Json.encodeToString(message))
+        val jsonText = Json.encodeToString(message)
         getSessionsInRoom(roomId).forEach { (playerId, session) ->
             if (playerId != excludePlayerId) {
-                runCatching { session.send(text) }
+                runCatching { session.send(Frame.Text(jsonText)) }
             }
         }
     }
