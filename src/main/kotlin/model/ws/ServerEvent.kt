@@ -85,6 +85,32 @@ data class NotifyApplePubliclyRevealedPayload(
 )
 
 @Serializable
+data class EndingRevealPlayerPayload(
+    val playerId: String,
+    val userName: String,
+    val role: String,
+    val faction: String,
+    val isPoisoned: Boolean,
+    val isAlive: Boolean,
+    val revealIndex: Int,
+    val totalPlayers: Int
+)
+
+@Serializable
+data class SnowWhiteKilledPayload(
+    val cause: String,
+    val killerPlayerId: String? = null,
+    val snowWhitePlayerId: String
+)
+
+@Serializable
+data class VictoryAnnouncementPayload(
+    val winFaction: String,
+    val snowWhiteAlive: Boolean,
+    val roseAlive: Boolean? = null
+)
+
+@Serializable
 data class NotifyRoulettePayload(
     val cardType: String,
     val direction: String,
@@ -190,6 +216,9 @@ object EventType {
     const val NOTIFY_EXCHANGE_HAND = "NOTIFY_EXCHANGE_HAND"
     const val NOTIFY_EXCHANGE_APPLE = "NOTIFY_EXCHANGE_APPLE"
     const val NOTIFY_APPLE_PUBLICLY_REVEALED = "NOTIFY_APPLE_PUBLICLY_REVEALED"
+    const val ENDING_REVEAL_PLAYER = "ENDING_REVEAL_PLAYER"
+    const val SNOW_WHITE_KILLED = "SNOW_WHITE_KILLED"
+    const val VICTORY_ANNOUNCEMENT = "VICTORY_ANNOUNCEMENT"
     const val NOTIFY_ROULETTE = "NOTIFY_ROULETTE"
     const val NOTIFY_PREFERENCE_ANSWERED = "NOTIFY_PREFERENCE_ANSWERED"
     const val NOTIFY_PLAYER_DIED = "NOTIFY_PLAYER_DIED"

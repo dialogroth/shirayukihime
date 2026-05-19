@@ -887,25 +887,52 @@ class GameService(
         val newState = GameStateManager.update(roomId) { it.copy(phase = GamePhase.ENDING_REVEAL) } ?: return
         broadcast(roomId, EventType.PHASE_CHANGED, PhaseChangedPayload("ENDING_REVEAL", null))
 
-        // 未公開リンゴを全体公開
-        newState.apples.filter { !it.isPubliclyRevealed }.forEach { apple ->
-            GameStateManager.update(roomId) { s ->
-                s.copy(apples = s.apples.map { if (it.appleId == apple.appleId) it.copy(isPubliclyRevealed = true) else it })
-            }
-            broadcast(roomId, EventType.NOTIFY_APPLE_PUBLICLY_REVEALED, NotifyApplePubliclyRevealedPayload(
-                apple.appleId.toString(), apple.currentHolderPlayerId.toString(), apple.isPoisoned
+        // 一人ずつ役職公開 → リンゴ判定 → 死亡通知 を順番に行う
+        val players = newState.players.values.sortedBy { newState.turnOrder.indexOf(it.playerId) }
+        val totalPlayers = players.size
+
+        players.forEachIndexed { index, player ->
+            delay(2500) // 2.5秒間隔で一人ずつ公開
+
+            val apple = newState.appleOf(player.playerId)
+            val isPoisoned = apple?.isPoisoned ?: false
+            val willDie = isPoisoned && player.isAlive
+
+            // 役職とリンゴ結果を公開
+            broadcast(roomId, EventType.ENDING_REVEAL_PLAYER, EndingRevealPlayerPayload(
+                playerId = player.playerId.toString(),
+                userName = player.userName,
+                role = player.role.name,
+                faction = player.faction.name,
+                isPoisoned = isPoisoned,
+                isAlive = !willDie && player.isAlive,
+                revealIndex = index,
+                totalPlayers = totalPlayers
             ))
-        }
 
-        // 毒リンゴ保持者を死亡
-        val finalState = GameStateManager.get(roomId) ?: return
-        finalState.apples.filter { it.isPoisoned }.forEach { apple ->
-            val holder = finalState.players[apple.currentHolderPlayerId]
-            if (holder != null && holder.isAlive) {
-                killPlayer(roomId, holder.playerId, "POISON_APPLE")
+            // 毒リンゴ保持者を死亡処理（白雪姫以外）
+            if (willDie && player.role != Role.SNOW_WHITE) {
+                GameStateManager.update(roomId) { s ->
+                    s.copy(players = s.players + (player.playerId to player.copy(isAlive = false)))
+                }
+                broadcast(roomId, EventType.NOTIFY_PLAYER_DIED, NotifyPlayerDiedPayload(player.playerId.toString(), "POISON_APPLE"))
+            } else if (willDie && player.role == Role.SNOW_WHITE) {
+                // 白雪姫が毒リンゴで死亡 → 特殊演出後にゲーム終了
+                GameStateManager.update(roomId) { s ->
+                    s.copy(players = s.players + (player.playerId to player.copy(isAlive = false)))
+                }
+                broadcast(roomId, EventType.NOTIFY_PLAYER_DIED, NotifyPlayerDiedPayload(player.playerId.toString(), "POISON_APPLE"))
+                broadcast(roomId, EventType.SNOW_WHITE_KILLED, SnowWhiteKilledPayload(
+                    cause = "POISON_APPLE",
+                    snowWhitePlayerId = player.playerId.toString()
+                ))
+                delay(3000)
+                endGameQueenWins(roomId, "SNOW_WHITE_KILLED")
+                return
             }
         }
 
+        delay(2000) // 全員公開後に少し待つ
         val endState = GameStateManager.get(roomId) ?: return
         broadcastGameStateSync(roomId, endState)
         determineWinner(roomId, endState)
@@ -920,6 +947,14 @@ class GameService(
             rose == null || !rose.isAlive -> Faction.SNOW_WHITE_FACTION
             else -> Faction.THIRD_FACTION
         }
+
+        // 勝利演出を送信
+        broadcast(roomId, EventType.VICTORY_ANNOUNCEMENT, VictoryAnnouncementPayload(
+            winFaction = winFaction.name,
+            snowWhiteAlive = snowWhite?.isAlive ?: false,
+            roseAlive = rose?.isAlive
+        ))
+        delay(5000) // 5秒間の演出表示
 
         val resultState = GameStateManager.update(roomId) { it.copy(phase = GamePhase.FINISHED) } ?: return
         roomRepository.updateStatus(roomId, RoomStatus.FINISHED)
@@ -947,26 +982,19 @@ class GameService(
     }
 
     private suspend fun forceEndGameBySnowWhiteDisconnect(roomId: UUID, snowWhiteId: UUID) {
-        killPlayer(roomId, snowWhiteId, "DISCONNECTED")
         val state = GameStateManager.get(roomId) ?: return
-        roomRepository.updateStatus(roomId, RoomStatus.FINISHED)
-
-        val resultPlayers = state.players.values.map { p ->
-            val apple = state.appleOf(p.playerId)
-            GameResultPlayer(
-                playerId = p.playerId.toString(), userName = p.userName,
-                role = p.role.name, faction = p.faction.name,
-                isAlive = p.isAlive, isWinner = p.faction == Faction.QUEEN_FACTION,
-                apple = AppleInfo(apple?.appleId.toString(), apple?.isPoisoned ?: false)
-            )
+        val player = state.players[snowWhiteId] ?: return
+        GameStateManager.update(roomId) { s ->
+            s.copy(players = s.players + (snowWhiteId to player.copy(isAlive = false)))
         }
-
-        broadcast(roomId, EventType.GAME_RESULT, GameResultPayload(
-            winFaction = Faction.QUEEN_FACTION.name,
-            reason = "SNOW_WHITE_DISCONNECTED",
-            players = resultPlayers
+        broadcast(roomId, EventType.NOTIFY_PLAYER_DIED, NotifyPlayerDiedPayload(snowWhiteId.toString(), "DISCONNECTED"))
+        broadcast(roomId, EventType.SNOW_WHITE_KILLED, SnowWhiteKilledPayload(
+            cause = "DISCONNECTED",
+            snowWhitePlayerId = snowWhiteId.toString()
         ))
-        GameStateManager.remove(roomId)
+        roomRepository.updateStatus(roomId, RoomStatus.FINISHED)
+        delay(3000)
+        endGameQueenWins(roomId, "SNOW_WHITE_DISCONNECTED")
     }
 
     // ── 再ゲーム ─────────────────────────────────────────────────────
@@ -1064,6 +1092,36 @@ class GameService(
             s.copy(players = s.players + (playerId to player.copy(isAlive = false)))
         }
         broadcast(roomId, EventType.NOTIFY_PLAYER_DIED, NotifyPlayerDiedPayload(playerId.toString(), cause))
+
+        // 白雪姫が死亡した場合 → 専用演出を送信してからゲーム終了
+        if (player.role == Role.SNOW_WHITE && cause != "POISON_APPLE") {
+            broadcast(roomId, EventType.SNOW_WHITE_KILLED, SnowWhiteKilledPayload(
+                cause = cause,
+                snowWhitePlayerId = playerId.toString()
+            ))
+            delay(3000)
+            endGameQueenWins(roomId, "SNOW_WHITE_KILLED")
+        }
+    }
+
+    private suspend fun endGameQueenWins(roomId: UUID, reason: String) {
+        val state = GameStateManager.get(roomId) ?: return
+        cancelTurnTimer(roomId)
+        val resultPlayers = state.players.values.map { p ->
+            val apple = state.appleOf(p.playerId)
+            GameResultPlayer(
+                playerId = p.playerId.toString(), userName = p.userName,
+                role = p.role.name, faction = p.faction.name,
+                isAlive = p.isAlive, isWinner = p.faction == Faction.QUEEN_FACTION,
+                apple = AppleInfo(apple?.appleId.toString(), apple?.isPoisoned ?: false)
+            )
+        }
+        broadcast(roomId, EventType.GAME_RESULT, GameResultPayload(
+            winFaction = Faction.QUEEN_FACTION.name,
+            reason = reason,
+            players = resultPlayers
+        ))
+        GameStateManager.remove(roomId)
     }
 
     private fun swapApples(roomId: UUID, playerA: UUID, playerB: UUID) {

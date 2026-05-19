@@ -233,6 +233,15 @@ function handleServerEvent(msg) {
       if (payload.playerId === state.playerId) state.thinkTimeUsed = true;
       state.turnTimeRemaining += payload.newTimeoutSeconds;
       break;
+    case 'ENDING_REVEAL_PLAYER':
+      showEndingRevealPlayer(payload);
+      break;
+    case 'SNOW_WHITE_KILLED':
+      showSnowWhiteKilled(payload);
+      break;
+    case 'VICTORY_ANNOUNCEMENT':
+      showVictoryAnnouncement(payload);
+      break;
     case 'GAME_RESULT':
       showGameResult(payload);
       break;
@@ -820,12 +829,98 @@ function showQueenExchangeUI(payload) {
   });
 }
 
+// === エンディング：一人ずつ役職公開 ===
+function showEndingRevealPlayer(payload) {
+  const container = document.getElementById('game-actions');
+  const causeLabel = payload.isPoisoned ? '☠️ 毒リンゴ → 死亡' : '🍏 安全 → 生存';
+  const aliveLabel = payload.isAlive ? '✅ 生存' : '💀 死亡';
+  const factionName = FACTION_NAMES[payload.faction] || payload.faction;
+  const roleName = ROLE_NAMES[payload.role] || payload.role;
+
+  container.innerHTML = `
+    <div style="text-align:center;padding:16px;">
+      <div style="font-size:0.8rem;color:#888;margin-bottom:4px;">公開 ${payload.revealIndex + 1} / ${payload.totalPlayers}</div>
+      <div style="font-size:1.3rem;font-weight:bold;margin-bottom:8px;">${payload.userName}</div>
+      <div style="font-size:1rem;margin-bottom:4px;">役職: <strong>${roleName}</strong>（${factionName}）</div>
+      <div style="font-size:1.1rem;margin-bottom:4px;">${payload.isPoisoned ? '🍎 毒リンゴ' : '🍏 安全リンゴ'}</div>
+      <div style="font-size:1.2rem;font-weight:bold;color:${payload.isAlive ? '#10b981' : '#ef4444'};">${aliveLabel}</div>
+    </div>
+  `;
+  log(`📋 ${payload.userName}: ${roleName}（${factionName}）- ${payload.isPoisoned ? '毒リンゴ' : '安全'} → ${payload.isAlive ? '生存' : '死亡'}`);
+}
+
+// === 白雪姫死亡の特殊演出 ===
+function showSnowWhiteKilled(payload) {
+  const container = document.getElementById('game-actions');
+  const causeMap = {
+    'CURSED_RING': '💍 呪いの指輪により',
+    'POISON_COMB': '🪮 毒の櫛により',
+    'DISCONNECTED': '📡 接続切断により',
+    'POISON_APPLE': '🍎 毒リンゴにより'
+  };
+  const causeText = causeMap[payload.cause] || payload.cause;
+  const snowWhiteName = getPlayerName(payload.snowWhitePlayerId);
+
+  container.innerHTML = `
+    <div style="text-align:center;padding:24px;background:linear-gradient(135deg,#1a0000,#330000);border-radius:12px;border:2px solid #ef4444;">
+      <div style="font-size:2rem;margin-bottom:12px;">👑💀</div>
+      <div style="font-size:1.3rem;font-weight:bold;color:#ef4444;margin-bottom:8px;">白雪姫が倒れました…</div>
+      <div style="font-size:1rem;color:#fca5a5;margin-bottom:4px;">${causeText}</div>
+      <div style="font-size:1rem;color:#fca5a5;">${snowWhiteName} は白雪姫でした</div>
+      <div style="font-size:1.1rem;font-weight:bold;color:#f59e0b;margin-top:16px;">👑 女王陣営の勝利！</div>
+    </div>
+  `;
+  log(`👑💀 白雪姫（${snowWhiteName}）が${causeText}死亡しました。女王陣営の勝利！`);
+}
+
+// === 勝利演出 ===
+function showVictoryAnnouncement(payload) {
+  const container = document.getElementById('game-actions');
+  let html = '';
+
+  if (payload.winFaction === 'SNOW_WHITE_FACTION') {
+    html = `
+      <div style="text-align:center;padding:24px;background:linear-gradient(135deg,#001a0a,#003318);border-radius:12px;border:2px solid #10b981;">
+        <div style="font-size:2.5rem;margin-bottom:12px;">🍏👑✨</div>
+        <div style="font-size:1.5rem;font-weight:bold;color:#10b981;margin-bottom:8px;">白雪姫は生き残った！</div>
+        <div style="font-size:1.2rem;color:#6ee7b7;margin-bottom:4px;">毒リンゴの呪いを乗り越えて…</div>
+        <div style="font-size:1.3rem;font-weight:bold;color:#34d399;margin-top:16px;">🎉 白雪姫陣営の勝利！</div>
+      </div>
+    `;
+    log(`🎉 白雪姫は生き残った！白雪姫陣営の勝利！`);
+  } else if (payload.winFaction === 'QUEEN_FACTION') {
+    html = `
+      <div style="text-align:center;padding:24px;background:linear-gradient(135deg,#1a0000,#330000);border-radius:12px;border:2px solid #ef4444;">
+        <div style="font-size:2.5rem;margin-bottom:12px;">👑☠️🍎</div>
+        <div style="font-size:1.5rem;font-weight:bold;color:#ef4444;margin-bottom:8px;">白雪姫は毒に倒れた…</div>
+        <div style="font-size:1.2rem;color:#fca5a5;margin-bottom:4px;">女王の策略は成功した</div>
+        <div style="font-size:1.3rem;font-weight:bold;color:#f59e0b;margin-top:16px;">👑 女王陣営の勝利！</div>
+      </div>
+    `;
+    log(`👑 白雪姫は毒に倒れた… 女王陣営の勝利！`);
+  } else if (payload.winFaction === 'THIRD_FACTION') {
+    html = `
+      <div style="text-align:center;padding:24px;background:linear-gradient(135deg,#1a001a,#330033);border-radius:12px;border:2px solid #c084fc;">
+        <div style="font-size:2.5rem;margin-bottom:12px;">🌹💀✨</div>
+        <div style="font-size:1.5rem;font-weight:bold;color:#c084fc;margin-bottom:8px;">ロゼの願いが叶った…</div>
+        <div style="font-size:1.2rem;color:#e9d5ff;margin-bottom:4px;">白雪姫は生き残り、ロゼは毒と共に眠る</div>
+        <div style="font-size:1.3rem;font-weight:bold;color:#a855f7;margin-top:16px;">🌹 第三陣営の勝利！</div>
+      </div>
+    `;
+    log(`🌹 ロゼの願いが叶った… 第三陣営の勝利！`);
+  }
+
+  container.innerHTML = html;
+}
+
 // === Game Result ===
 function showGameResult(payload) {
   showScreen('result');
   const title = document.getElementById('result-title');
   if (payload.reason === 'SNOW_WHITE_DISCONNECTED') {
     title.textContent = '白雪姫が切断したためゲームが終了しました';
+  } else if (payload.reason === 'SNOW_WHITE_KILLED') {
+    title.textContent = '白雪姫が倒れました… 女王陣営の勝利！';
   } else {
     title.textContent = `${FACTION_NAMES[payload.winFaction] || payload.winFaction} の勝利！`;
   }
