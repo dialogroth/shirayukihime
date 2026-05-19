@@ -70,7 +70,7 @@ fun Route.webSocketRoutes(
                     val text = frame.readText()
                     val clientMsg = runCatching { Json.decodeFromString<ClientMessage>(text) }.getOrNull() ?: continue
                     try {
-                        handleClientMessage(roomId, playerId, clientMsg, connectionManager, gameService, roomRepository)
+                        handleClientMessage(roomId, playerId, clientMsg, connectionManager, gameService, roomRepository, playerRepository)
                     } catch (e: Exception) {
                         println("Error handling client message: ${e.message}")
                         e.printStackTrace()
@@ -103,7 +103,8 @@ private suspend fun handleClientMessage(
     msg: ClientMessage,
     connectionManager: ConnectionManager,
     gameService: GameService,
-    roomRepository: RoomRepository
+    roomRepository: RoomRepository,
+    playerRepository: PlayerRepository
 ) {
     val payload = msg.payload
 
