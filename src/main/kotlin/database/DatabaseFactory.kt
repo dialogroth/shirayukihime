@@ -51,6 +51,27 @@ object DatabaseFactory {
                 RoomCardSettings,
                 Players
             )
+
+            // Migration: remove seat_order unique constraint if it exists
+            exec("DROP INDEX IF EXISTS players_room_id_seat_order_unique")
+            exec("ALTER TABLE players DROP CONSTRAINT IF EXISTS players_room_id_seat_order_unique")
+            // Try other possible naming conventions
+            exec("DROP INDEX IF EXISTS \"players_room_id_seat_order\"")
+            exec("ALTER TABLE players DROP CONSTRAINT IF EXISTS \"players_room_id_seat_order\"")
+            exec("""
+                DO $$
+                DECLARE r RECORD;
+                BEGIN
+                    FOR r IN (
+                        SELECT conname FROM pg_constraint
+                        WHERE conrelid = 'players'::regclass
+                        AND contype = 'u'
+                        AND array_length(conkey, 1) = 2
+                    ) LOOP
+                        EXECUTE 'ALTER TABLE players DROP CONSTRAINT ' || r.conname;
+                    END LOOP;
+                END $$;
+            """.trimIndent())
         }
     }
 }

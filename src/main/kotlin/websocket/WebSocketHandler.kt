@@ -176,6 +176,16 @@ private suspend fun handleClientMessage(
             connectionManager.broadcastExcept(roomId, playerId, msg)
         }
 
+        ClientEventType.LEAVE_ROOM -> {
+            val player = playerRepository.findById(playerId) ?: return
+            playerRepository.delete(playerId)
+            // Broadcast to remaining players
+            val leftMsg = WsMessage(EventType.PLAYER_LEFT, Json.encodeToJsonElement(
+                mapOf("playerId" to playerId.toString(), "userName" to player.userName)
+            ))
+            connectionManager.broadcastExcept(roomId, playerId, leftMsg)
+        }
+
         ClientEventType.SWAP_SEATS -> {
             val room = roomRepository.findById(roomId) ?: return
             if (room.hostPlayerId != playerId) return
@@ -183,11 +193,7 @@ private suspend fun handleClientMessage(
             val playerIdB = payload["playerIdB"]?.jsonPrimitive?.content ?: return
             val pidA = UUID.fromString(playerIdA)
             val pidB = UUID.fromString(playerIdB)
-            // Swap seat orders in DB
-            val playerA = playerRepository.findById(pidA) ?: return
-            val playerB = playerRepository.findById(pidB) ?: return
-            playerRepository.updateSeatOrder(pidA, playerB.seatOrder)
-            playerRepository.updateSeatOrder(pidB, playerA.seatOrder)
+            playerRepository.swapSeatOrders(pidA, pidB)
             // Broadcast the swap to all
             val swapMsg = WsMessage(EventType.SEATS_SWAPPED, Json.encodeToJsonElement(
                 mapOf("playerIdA" to playerIdA, "playerIdB" to playerIdB)
@@ -200,10 +206,14 @@ private suspend fun handleClientMessage(
             if (room.hostPlayerId != playerId) return
             val players = playerRepository.findByRoomId(roomId)
             val shuffledOrders = players.map { it.seatOrder }.shuffled()
+            // First set all to negative temp values to avoid unique constraint
+            players.forEachIndexed { index, player ->
+                playerRepository.updateSeatOrder(player.id, -(index + 1))
+            }
+            // Then set to final shuffled values
             players.forEachIndexed { index, player ->
                 playerRepository.updateSeatOrder(player.id, shuffledOrders[index])
             }
-            // Broadcast to all so they re-poll
             val shuffleMsg = WsMessage(EventType.SEATS_SWAPPED, Json.encodeToJsonElement(
                 mapOf("shuffled" to "true")
             ))

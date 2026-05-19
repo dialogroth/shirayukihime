@@ -15,6 +15,5 @@ object Players : UUIDTable("players") {
 
     init {
         uniqueIndex(roomId, userName)
-        uniqueIndex(roomId, seatOrder)
     }
 }

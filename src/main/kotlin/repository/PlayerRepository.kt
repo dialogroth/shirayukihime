@@ -59,8 +59,23 @@ class PlayerRepository {
         }
     }
 
+    fun swapSeatOrders(idA: UUID, idB: UUID) = transaction {
+        val playerA = Players.selectAll().where { Players.id eq idA }.single()
+        val playerB = Players.selectAll().where { Players.id eq idB }.single()
+        val orderA = playerA[Players.seatOrder]
+        val orderB = playerB[Players.seatOrder]
+        // Use -1 as temporary to avoid unique constraint violation
+        Players.update({ Players.id eq idA }) { it[Players.seatOrder] = -1 }
+        Players.update({ Players.id eq idB }) { it[Players.seatOrder] = orderA }
+        Players.update({ Players.id eq idA }) { it[Players.seatOrder] = orderB }
+    }
+
     fun deleteDisconnected(roomId: UUID) = transaction {
         Players.deleteWhere { (Players.roomId eq roomId) and (Players.isConnected eq false) }
+    }
+
+    fun delete(id: UUID) = transaction {
+        Players.deleteWhere { Players.id eq id }
     }
 
     fun compactSeatOrders(roomId: UUID) = transaction {

@@ -23,6 +23,7 @@ object ClientEventType {
     const val RESPONSE_QUEEN_EXCHANGE = "RESPONSE_QUEEN_EXCHANGE"
     const val ACTION_THINK_TIME = "ACTION_THINK_TIME"
     const val DISBAND_ROOM = "DISBAND_ROOM"
+    const val LEAVE_ROOM = "LEAVE_ROOM"
     const val SWAP_SEATS = "SWAP_SEATS"
     const val SHUFFLE_SEATS = "SHUFFLE_SEATS"
     const val DRAG_SEAT = "DRAG_SEAT"

@@ -114,6 +114,9 @@ function handleServerEvent(msg) {
       // Re-poll to get updated seat orders
       pollRoom();
       break;
+    case 'PLAYER_LEFT':
+      pollRoom();
+      break;
     case 'DRAG_SEAT_UPDATE':
       // Show drag indicator for other players
       state.dragOverSeat = payload.overSeatIndex !== '' ? parseInt(payload.overSeatIndex) : null;
@@ -1092,6 +1095,8 @@ document.getElementById('btn-leave-room').onclick = () => {
   if (state.isHost) {
     if (!confirm('ルームを解散しますか？')) return;
     sendEvent('DISBAND_ROOM');
+  } else {
+    sendEvent('LEAVE_ROOM');
   }
   resetAndGoHome();
 };

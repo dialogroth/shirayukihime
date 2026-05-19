@@ -66,11 +66,13 @@ class RoomService(
 
         val settings = roomRepository.findSettings(room.id)
         val maxPlayers = settings?.roles?.size ?: Int.MAX_VALUE
-        val currentCount = playerRepository.findByRoomId(room.id).size
-        if (currentCount >= maxPlayers)
+        val existingPlayers = playerRepository.findByRoomId(room.id)
+        if (existingPlayers.size >= maxPlayers)
             error("ROOM_FULL")
 
-        val seatOrder = playerRepository.nextSeatOrder(room.id)
+        // Find first empty seat (gap in seat orders)
+        val occupiedSeats = existingPlayers.map { it.seatOrder }.toSet()
+        val seatOrder = (0 until maxPlayers).first { it !in occupiedSeats }
         val playerId = playerRepository.create(room.id, userName, seatOrder)
 
         return JoinRoomResult(room.id, playerId, roomCode)
