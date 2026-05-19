@@ -1,7 +1,8 @@
 # データモデル設計書：白雪姫のアップルルーレット
 
-**バージョン：** 2.3  
+**バージョン：** 2.4  
 **作成日：** 2026年5月10日  
+**最終更新：** 2026年5月19日
 
 ---
 
@@ -148,7 +149,7 @@ enum class RoomStatus {
 ```sql
 CREATE TABLE rooms (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    room_code     VARCHAR(6) NOT NULL UNIQUE,   -- 参加用コード（英数字6桁）
+    room_code     VARCHAR(6) NOT NULL UNIQUE,   -- 参加用コード（数字6桁）
     host_player_id UUID,                         -- ホストプレイヤーのID。循環依存のためFK制約は後述のALTER TABLEで追加
     status        VARCHAR(20) NOT NULL DEFAULT 'WAITING',  -- RoomStatus
     created_at    TIMESTAMP NOT NULL DEFAULT now(),
@@ -204,8 +205,7 @@ CREATE TABLE players (
     is_host      BOOLEAN NOT NULL DEFAULT false,
     is_connected BOOLEAN NOT NULL DEFAULT true,
     created_at   TIMESTAMP NOT NULL DEFAULT now(),
-    UNIQUE (room_id, user_name),      -- 同一ルーム内でユーザー名重複禁止
-    UNIQUE (room_id, seat_order)
+    UNIQUE (room_id, user_name)      -- 同一ルーム内でユーザー名重複禁止
 );
 ```
 
@@ -222,7 +222,7 @@ data class GameState(
     val gameId: UUID,                        // ゲームセッションの識別子（インメモリのみ。DBには保存しない）
     val roomId: UUID,
     val phase: GamePhase,
-    val turnOrder: List<UUID>,              // 手番順のプレイヤーIDリスト（seat_orderベース）
+    val turnOrder: List<UUID>,              // 手番順のプレイヤーIDリスト（seat_order昇順。seat_order=0が最初の手番）
     val currentTurnIndex: Int,              // turnOrder上の現在の手番インデックス
     val lastTurnStartPlayerIndex: Int?,     // 最後の手番フェイズの開始プレイヤーのインデックス（STORYフェイズ中はnull）
     val players: Map<UUID, GamePlayer>,     // playerId → GamePlayer
@@ -270,12 +270,16 @@ data class GamePlayer(
 
     // 好み回答履歴（UIに表示するため保持）
     val applePreferenceAnswer: Boolean? = null,    // リンゴは好き？の回答（null=未回答）
-    val mushroomPreferenceAnswer: Boolean? = null  // きのこは好き？の回答（null=未回答）
+    val mushroomPreferenceAnswer: Boolean? = null,  // きのこは好き？の回答（null=未回答）
+
+    // 長考ボタン使用状況
+    val thinkTimeUsed: Boolean = false             // 長考ボタン使用済みか（1ゲームに1回のみ）
 )
 ```
 
 > **`isConnected` と `isAlive` の連動ルール：**
 > - WebSocket切断を検知した時点で `isConnected = false` にのみ更新し、1分のタイマーを開始する
+> - **手番中に切断した場合：** ターンタイマー（3分）を即座にキャンセルし、切断タイマー（1分）を開始する
 > - **白雪姫（`role == SNOW_WHITE`）が切断した場合のみ**、即座にゲーム強制終了処理を行う（5-3参照）
 > - 白雪姫以外の切断で **1分以内に再接続**した場合は `isConnected = true` に戻しゲームを続行する
 > - 白雪姫以外の切断で **1分経過しても再接続なし**の場合、`isConnected = false` かつ `isAlive = false` を同時にcopyパターンで更新し、死亡扱いとする
@@ -355,7 +359,7 @@ data class GameCard(
    - ブラックの privatelyKnownBy に全毒リンゴの情報を追加
    - カードをシャッフルして `cards`（Map）と `deckOrder`（IDリスト）を構成
    - 各プレイヤーに手札を1枚配る（該当カードの location を HAND に、holderPlayerId を設定）
-   - 最初の手番プレイヤーをランダムに決定
+   - 手番順を seat_order 昇順で構成（seat_order=0 のプレイヤーが最初の手番）
 5. 各プレイヤーへ初期情報をWebSocketで送信：
    - 全員：自分の役職・自分のリンゴが毒か通常か
    - グリーン：白雪姫が誰か（`GameState.players` から `role == SNOW_WHITE` のプレイヤーIDを導出して送信。専用フィールドは持たず、常にこの方法で導出する）
@@ -497,9 +501,10 @@ data class GameCard(
 
 ### 6-5. 座席順とターン順の関係
 
-- `seat_order`（0始まり）は固定。座席の物理的な並び順であり、アップルルーレットの移動方向の基準になる
-- `turnOrder`（`GameState` 内）はゲーム開始時に `seat_order` をもとに生成するリスト。ランダムに決定された最初の手番プレイヤーを起点として時計回りに並べる
-- アップルルーレットは `seat_order` ベースで移動し、`turnOrder` とは独立している
+- `seat_order`（0始まり）はルーム待機中にホストがドラッグアンドドロップで入れ替え可能。座席の物理的な並び順であり、アップルルーレットの移動方向の基準になる
+- `turnOrder`（`GameState` 内）はゲーム開始時に `seat_order` 昇順で生成するリスト。`seat_order=0` のプレイヤーがスタートプレイヤー（最初の手番）となる
+- アップルルーレットは `seat_order` ベースで移動し、`turnOrder` と一致する
+- `seat_order` にはユニーク制約を設けない（ドラッグアンドドロップ・シャッフル時の入れ替え処理を容易にするため）
 
 ### 6-6. 騎士の有効条件
 

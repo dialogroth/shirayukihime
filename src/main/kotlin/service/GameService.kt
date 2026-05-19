@@ -218,8 +218,8 @@ class GameService(
         val startIndex = state.lastTurnStartPlayerIndex ?: state.currentTurnIndex
         val nextIndex = nextAliveIndex(state, state.currentTurnIndex)
 
-        // 現在のプレイヤーが開始プレイヤーだった場合、一周完了 → エンディングへ
-        if (state.currentTurnIndex == startIndex) {
+        // 次のプレイヤーが開始プレイヤーに戻る場合、一周完了 → エンディングへ
+        if (nextIndex == startIndex) {
             startEndingPhase(roomId)
             return
         }
@@ -426,6 +426,8 @@ class GameService(
             }
             CardType.ITADAKIMASU -> {
                 val count = params["count"]?.toIntOrNull() ?: 1
+                val maxDiscardable = maxOf(0, state.deckOrder.size - 1)
+                if (maxDiscardable == 0) return sendError(roomId, playerId, "INVALID_ACTION", "山札の最後の1枚は捨てられません")
                 if (handleItadakimasu(roomId, playerId, cardId, count)) return
             }
             CardType.ROULETTE_1, CardType.ROULETTE_2, CardType.ROULETTE_3 -> {

@@ -519,12 +519,6 @@ function renderTurnActions() {
   const phase = gs.phase;
   const canDraw = (phase === 'STORY' || phase === 'LAST_TURN') && gs.deckRemainingCount > 1;
 
-  // 最後の手番フェイズで山札が引けない場合、手札1枚をそのまま使用/捨てる選択肢を表示
-  if (phase === 'LAST_TURN' && !canDraw && state.myHand.length === 1) {
-    renderCardChoiceUI();
-    return;
-  }
-
   // ① 山札を引く
   const btnDraw = createBtn('① 山札を引く', () => sendEvent('ACTION_DRAW_CARD'));
   btnDraw.disabled = !canDraw;
@@ -537,13 +531,28 @@ function renderTurnActions() {
   container.appendChild(createBtn('③ リンゴの交換', () => showTargetSelect('ACTION_EXCHANGE_APPLE')));
 
   // ④ 自分のリンゴの確認
-  container.appendChild(createBtn('④ リンゴ確認', () => sendEvent('ACTION_CHECK_OWN_APPLE')));
+  container.appendChild(createBtn('④ リンゴ確認', () => showAppleCheckConfirm()));
 
   // ⑤ 能力発動
   const canAbility = (state.role === 'GRAY' || state.role === 'LIGHT');
   const btnAbility = createBtn('⑤ 能力発動', () => showAbilityUI());
   btnAbility.disabled = !canAbility;
   container.appendChild(btnAbility);
+
+  // ⑥ 手札を使う/捨てる
+  if (state.myHand.length >= 1) {
+    container.appendChild(createBtn('⑥ 手札を使う/捨てる', () => renderCardChoiceUI()));
+  }
+}
+
+// === リンゴ確認の確認ダイアログ ===
+function showAppleCheckConfirm() {
+  const container = document.getElementById('game-actions');
+  container.innerHTML = '<div style="width:100%;text-align:center;font-size:0.9rem;font-weight:bold;margin-bottom:12px;">本当にリンゴを確認しますか？</div>';
+  container.appendChild(createBtn('確認する', () => sendEvent('ACTION_CHECK_OWN_APPLE')));
+  const cancelBtn = createBtn('キャンセル', () => renderTurnActions());
+  cancelBtn.classList.add('btn-secondary');
+  container.appendChild(cancelBtn);
 }
 
 // 最後の手番フェイズでの「戻る」用：カード選択UIを経由せず直接5つのアクションを表示
@@ -561,7 +570,7 @@ function renderTurnActions_main() {
   container.appendChild(btnDraw);
   container.appendChild(createBtn('② 手札の交換', () => showTargetSelect('ACTION_EXCHANGE_HAND')));
   container.appendChild(createBtn('③ リンゴの交換', () => showTargetSelect('ACTION_EXCHANGE_APPLE')));
-  container.appendChild(createBtn('④ リンゴ確認', () => sendEvent('ACTION_CHECK_OWN_APPLE')));
+  container.appendChild(createBtn('④ リンゴ確認', () => showAppleCheckConfirm()));
 
   const canAbility = (state.role === 'GRAY' || state.role === 'LIGHT');
   const btnAbility = createBtn('⑤ 能力発動', () => showAbilityUI());
@@ -661,7 +670,10 @@ function showCardUseUI(card) {
       break;
 
     case 'ITADAKIMASU':
-      const maxDiscard = Math.min(3, gs.deckRemainingCount);
+      const maxDiscard = Math.min(3, Math.max(0, gs.deckRemainingCount - 1));
+      if (maxDiscard === 0) {
+        container.innerHTML += '<div style="width:100%;text-align:center;color:#aaa;font-size:0.85rem;">山札の最後の1枚は捨てられません</div>';
+      }
       for (let i = 1; i <= maxDiscard; i++) {
         container.appendChild(createBtn(`${i}枚捨てる`, () =>
           sendEvent('ACTION_USE_CARD', { cardId: card.cardId, cardType: card.cardType, params: { count: String(i) } })
