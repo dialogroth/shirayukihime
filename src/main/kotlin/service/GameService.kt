@@ -26,6 +26,12 @@ class GameService(
     private val pendingPreference = mutableMapOf<UUID, Pair<UUID, String>>()
     // roomId -> waiting for queen exchange
     private val pendingQueenExchange = mutableMapOf<UUID, Boolean>()
+    // roomId -> waiting for host to proceed to reveal
+    private val pendingProceedToReveal = mutableMapOf<UUID, Boolean>()
+    // roomId -> waiting for host to proceed to result
+    private val pendingProceedToResult = mutableMapOf<UUID, Boolean>()
+    private val proceedToRevealTimerJobs = mutableMapOf<UUID, Job>()
+    private val proceedToResultTimerJobs = mutableMapOf<UUID, Job>()
 
     // ── ゲーム初期化 ──────────────────────────────────────────────────
 
@@ -370,11 +376,10 @@ class GameService(
 
         // 山札が残り1枚になったらLAST_TURNへ（次のプレイヤーから開始）
         if (newState.deckOrder.size == 1 && newState.phase == GamePhase.STORY) {
-            val nextIdx = nextAliveIndex(newState, newState.currentTurnIndex)
             GameStateManager.update(roomId) { s ->
                 s.copy(
                     phase = GamePhase.LAST_TURN,
-                    lastTurnStartPlayerIndex = nextIdx
+                    lastTurnStartPlayerIndex = s.currentTurnIndex
                 )
             }
             broadcast(roomId, EventType.PHASE_CHANGED, PhaseChangedPayload("LAST_TURN", playerId.toString()))
@@ -884,6 +889,29 @@ class GameService(
     }
 
     private suspend fun startEndingReveal(roomId: UUID) {
+        // ホストが「エンディングリビールに進む」ボタンを押すまで待機（1分タイムアウト）
+        pendingProceedToReveal[roomId] = true
+        broadcast(roomId, EventType.WAITING_HOST_PROCEED, WaitingHostProceedPayload("ENDING_REVEAL"))
+        proceedToRevealTimerJobs[roomId] = scope.launch {
+            delay(60_000)
+            if (pendingProceedToReveal[roomId] == true) {
+                pendingProceedToReveal.remove(roomId)
+                broadcast(roomId, EventType.NOTIFY_TIMEOUT, NotifyTimeoutPayload(
+                    timeoutType = "HOST_PROCEED", playerId = "", autoAction = "ホストの操作が行われませんでした"
+                ))
+                executeEndingReveal(roomId)
+            }
+        }
+    }
+
+    suspend fun handleProceedToReveal(roomId: UUID, hostPlayerId: UUID) {
+        if (pendingProceedToReveal[roomId] != true) return
+        pendingProceedToReveal.remove(roomId)
+        proceedToRevealTimerJobs.remove(roomId)?.cancel()
+        executeEndingReveal(roomId)
+    }
+
+    private suspend fun executeEndingReveal(roomId: UUID) {
         val newState = GameStateManager.update(roomId) { it.copy(phase = GamePhase.ENDING_REVEAL) } ?: return
         broadcast(roomId, EventType.PHASE_CHANGED, PhaseChangedPayload("ENDING_REVEAL", null))
 
@@ -892,7 +920,7 @@ class GameService(
         val totalPlayers = players.size
 
         players.forEachIndexed { index, player ->
-            delay(2500) // 2.5秒間隔で一人ずつ公開
+            delay(4000) // 4秒間隔で一人ずつ公開
 
             val apple = newState.appleOf(player.playerId)
             val isPoisoned = apple?.isPoisoned ?: false
@@ -926,15 +954,36 @@ class GameService(
                     cause = "POISON_APPLE",
                     snowWhitePlayerId = player.playerId.toString()
                 ))
-                delay(3000)
+                delay(5000)
                 endGameQueenWins(roomId, "SNOW_WHITE_KILLED")
                 return
             }
         }
 
-        delay(2000) // 全員公開後に少し待つ
+        delay(5000) // 全員公開後に勝利演出前の間を取る
         val endState = GameStateManager.get(roomId) ?: return
         broadcastGameStateSync(roomId, endState)
+        // ホストが「結果画面に進む」ボタンを押すまで待機（1分タイムアウト）
+        pendingProceedToResult[roomId] = true
+        broadcast(roomId, EventType.WAITING_HOST_PROCEED, WaitingHostProceedPayload("RESULT"))
+        proceedToResultTimerJobs[roomId] = scope.launch {
+            delay(60_000)
+            if (pendingProceedToResult[roomId] == true) {
+                pendingProceedToResult.remove(roomId)
+                broadcast(roomId, EventType.NOTIFY_TIMEOUT, NotifyTimeoutPayload(
+                    timeoutType = "HOST_PROCEED", playerId = "", autoAction = "ホストの操作が行われませんでした"
+                ))
+                val s = GameStateManager.get(roomId) ?: return@launch
+                determineWinner(roomId, s)
+            }
+        }
+    }
+
+    suspend fun handleProceedToResult(roomId: UUID, hostPlayerId: UUID) {
+        if (pendingProceedToResult[roomId] != true) return
+        pendingProceedToResult.remove(roomId)
+        proceedToResultTimerJobs.remove(roomId)?.cancel()
+        val endState = GameStateManager.get(roomId) ?: return
         determineWinner(roomId, endState)
     }
 

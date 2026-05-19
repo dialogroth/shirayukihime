@@ -27,4 +27,6 @@ object ClientEventType {
     const val SWAP_SEATS = "SWAP_SEATS"
     const val SHUFFLE_SEATS = "SHUFFLE_SEATS"
     const val DRAG_SEAT = "DRAG_SEAT"
+    const val PROCEED_TO_REVEAL = "PROCEED_TO_REVEAL"
+    const val PROCEED_TO_RESULT = "PROCEED_TO_RESULT"
 }

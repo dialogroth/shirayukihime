@@ -202,6 +202,9 @@ data class ErrorPayload(val code: String, val message: String)
 @Serializable
 class NotifyRematchStartingPayload
 
+@Serializable
+data class WaitingHostProceedPayload(val nextPhase: String)
+
 object EventType {
     const val PLAYER_JOINED = "PLAYER_JOINED"
     const val PLAYER_DISCONNECTED = "PLAYER_DISCONNECTED"
@@ -239,5 +242,6 @@ object EventType {
     const val PLAYER_LEFT = "PLAYER_LEFT"
     const val SEATS_SWAPPED = "SEATS_SWAPPED"
     const val DRAG_SEAT_UPDATE = "DRAG_SEAT_UPDATE"
+    const val WAITING_HOST_PROCEED = "WAITING_HOST_PROCEED"
     const val ERROR = "ERROR"
 }

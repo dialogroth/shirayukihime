@@ -230,5 +230,17 @@ private suspend fun handleClientMessage(
             ))
             connectionManager.broadcastExcept(roomId, playerId, dragMsg)
         }
+
+        ClientEventType.PROCEED_TO_REVEAL -> {
+            val room = roomRepository.findById(roomId) ?: return
+            if (room.hostPlayerId != playerId) return
+            gameService.handleProceedToReveal(roomId, playerId)
+        }
+
+        ClientEventType.PROCEED_TO_RESULT -> {
+            val room = roomRepository.findById(roomId) ?: return
+            if (room.hostPlayerId != playerId) return
+            gameService.handleProceedToResult(roomId, playerId)
+        }
     }
 }
