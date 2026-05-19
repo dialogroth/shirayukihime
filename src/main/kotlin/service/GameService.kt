@@ -218,8 +218,8 @@ class GameService(
         val startIndex = state.lastTurnStartPlayerIndex ?: state.currentTurnIndex
         val nextIndex = nextAliveIndex(state, state.currentTurnIndex)
 
-        if (nextIndex == startIndex) {
-            // 一周完了 → エンディングへ
+        // 現在のプレイヤーが開始プレイヤーだった場合、一周完了 → エンディングへ
+        if (state.currentTurnIndex == startIndex) {
             startEndingPhase(roomId)
             return
         }
