@@ -35,7 +35,22 @@ class GameService(
 
     // ── ゲーム初期化 ──────────────────────────────────────────────────
 
+    private fun cleanupGameState(roomId: UUID) {
+        turnTimerJobs.remove(roomId)?.cancel()
+        preferenceTimerJobs.remove(roomId)?.cancel()
+        queenExchangeTimerJobs.remove(roomId)?.cancel()
+        proceedToRevealTimerJobs.remove(roomId)?.cancel()
+        proceedToResultTimerJobs.remove(roomId)?.cancel()
+        pendingPreference.remove(roomId)
+        pendingQueenExchange.remove(roomId)
+        pendingProceedToReveal.remove(roomId)
+        pendingProceedToResult.remove(roomId)
+    }
+
     suspend fun initGame(roomId: UUID, hostPlayerId: UUID? = null) {
+        // 前回ゲームの残留状態をクリア（再ゲーム対応）
+        cleanupGameState(roomId)
+
         val settings = roomRepository.findSettings(roomId)
         if (settings == null) {
             if (hostPlayerId != null) sendError(roomId, hostPlayerId, "SETTINGS_NOT_FOUND", "ルーム設定が見つかりません")
@@ -176,6 +191,7 @@ class GameService(
                 killPlayer(roomId, currentPlayerId, "CURSED_RING")
                 val newState = GameStateManager.get(roomId) ?: return
                 broadcastGameStateSync(roomId, newState)
+                if (newState.phase == GamePhase.FINISHED) return
                 advanceTurn(roomId)
                 return
             }
@@ -221,14 +237,19 @@ class GameService(
     }
 
     private suspend fun advanceLastTurn(roomId: UUID, state: GameState) {
-        val startIndex = state.lastTurnStartPlayerIndex ?: state.currentTurnIndex
-        val nextIndex = nextAliveIndex(state, state.currentTurnIndex)
+        // 現在のプレイヤーをプレイ済みに追加
+        val currentPlayerId = state.currentTurnPlayerId()
+        val playedSet = state.lastTurnPlayersPlayed + currentPlayerId
+        GameStateManager.update(roomId) { it.copy(lastTurnPlayersPlayed = playedSet) }
 
-        // 次のプレイヤーが開始プレイヤーに戻る場合、一周完了 → エンディングへ
-        if (nextIndex == startIndex) {
+        // 全ての生存プレイヤーがプレイ済みなら一周完了 → エンディングへ
+        val alivePlayerIds = state.players.values.filter { it.isAlive }.map { it.playerId }.toSet()
+        if (alivePlayerIds.all { it in playedSet }) {
             startEndingPhase(roomId)
             return
         }
+
+        val nextIndex = nextAliveIndex(state, state.currentTurnIndex)
         GameStateManager.update(roomId) { it.copy(currentTurnIndex = nextIndex) }
         startTurn(roomId)
     }
@@ -254,7 +275,8 @@ class GameService(
             s.copy(
                 phase = GamePhase.LAST_TURN,
                 currentTurnIndex = nextIdx,
-                lastTurnStartPlayerIndex = nextIdx
+                lastTurnStartPlayerIndex = nextIdx,
+                lastTurnPlayersPlayed = emptySet()
             )
         } ?: return
 
@@ -462,6 +484,7 @@ class GameService(
 
         val newState = GameStateManager.get(roomId) ?: return
         broadcastGameStateSync(roomId, newState)
+        if (newState.phase == GamePhase.FINISHED) return
         advanceTurn(roomId)
     }
 
@@ -781,34 +804,20 @@ class GameService(
     // ── エンディングフェイズ ───────────────────────────────────────────
 
     private suspend fun startEndingPhase(roomId: UUID) {
-        // 最後の手番フェイズ終了 → 全員のリンゴを公開（死亡判定はしない）
-        val preState = GameStateManager.get(roomId) ?: return
-        GameStateManager.update(roomId) { s ->
-            val revealedApples = s.apples.map { it.copy(isPubliclyRevealed = true) }
-            s.copy(apples = revealedApples)
-        }
-        // 全員にリンゴ公開を通知
-        preState.apples.forEach { apple ->
-            broadcast(roomId, EventType.NOTIFY_APPLE_PUBLICLY_REVEALED, NotifyApplePubliclyRevealedPayload(
-                apple.appleId.toString(), apple.currentHolderPlayerId.toString(), apple.isPoisoned
-            ))
-        }
-        val syncState = GameStateManager.get(roomId) ?: return
-        broadcastGameStateSync(roomId, syncState)
-
         // 女王特権フェイズへ移行
         val state = GameStateManager.update(roomId) { it.copy(phase = GamePhase.ENDING_QUEEN) } ?: return
         broadcast(roomId, EventType.PHASE_CHANGED, PhaseChangedPayload("ENDING_QUEEN", null))
+        broadcastGameStateSync(roomId, state)
 
         val queenPlayer = state.players.values.find { it.role == Role.QUEEN }
         if (queenPlayer == null || !queenPlayer.isAlive) {
-            // 女王死亡 → 即座にENDING_REVEALへ
+            // 女王死亡 → 即座にリンゴ公開へ
             GameStateManager.update(roomId) { it.copy(queenSpecialDone = true) }
-            startEndingReveal(roomId)
+            revealAllApplesAndProceed(roomId)
             return
         }
 
-        val queenApple = state.appleOf(queenPlayer.playerId) ?: return startEndingReveal(roomId)
+        val queenApple = state.appleOf(queenPlayer.playerId) ?: return revealAllApplesAndProceed(roomId)
         // 女王のリンゴを全体公開
         GameStateManager.update(roomId) { s ->
             val updatedApples = s.apples.map {
@@ -825,7 +834,7 @@ class GameService(
         if (!queenApple.isPoisoned) {
             // 通常リンゴ → 交換なし
             GameStateManager.update(roomId) { it.copy(queenSpecialDone = true) }
-            startEndingReveal(roomId)
+            revealAllApplesAndProceed(roomId)
             return
         }
 
@@ -842,6 +851,25 @@ class GameService(
             delay(180_000)
             handleQueenExchangeTimeout(roomId, queenPlayer.playerId)
         }
+    }
+
+    /** 女王の特権完了後：全員のリンゴを公開（死亡判定なし）してからエンディングリビールへ */
+    private suspend fun revealAllApplesAndProceed(roomId: UUID) {
+        val preState = GameStateManager.get(roomId) ?: return
+        GameStateManager.update(roomId) { s ->
+            val revealedApples = s.apples.map { it.copy(isPubliclyRevealed = true) }
+            s.copy(apples = revealedApples)
+        }
+        // 全員にリンゴ公開を通知
+        preState.apples.forEach { apple ->
+            broadcast(roomId, EventType.NOTIFY_APPLE_PUBLICLY_REVEALED, NotifyApplePubliclyRevealedPayload(
+                apple.appleId.toString(), apple.currentHolderPlayerId.toString(), apple.isPoisoned
+            ))
+        }
+        val syncState = GameStateManager.get(roomId) ?: return
+        broadcastGameStateSync(roomId, syncState)
+
+        startEndingReveal(roomId)
     }
 
     suspend fun handleQueenExchangeResponse(roomId: UUID, queenPlayerId: UUID, targetId: UUID) {
@@ -868,7 +896,7 @@ class GameService(
 
         GameStateManager.update(roomId) { it.copy(queenSpecialDone = true) }
         broadcast(roomId, EventType.PHASE_CHANGED, PhaseChangedPayload("ENDING_REVEAL", null))
-        startEndingReveal(roomId)
+        revealAllApplesAndProceed(roomId)
     }
 
     private suspend fun handleQueenExchangeTimeout(roomId: UUID, queenPlayerId: UUID) {
@@ -878,7 +906,7 @@ class GameService(
         val state = GameStateManager.get(roomId) ?: return
         val aliveTargets = state.players.values.filter { it.isAlive && it.playerId != queenPlayerId }
         val randomTarget = aliveTargets.randomOrNull() ?: run {
-            startEndingReveal(roomId)
+            revealAllApplesAndProceed(roomId)
             return
         }
 

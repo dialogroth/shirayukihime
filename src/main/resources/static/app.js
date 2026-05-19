@@ -226,7 +226,15 @@ function handleServerEvent(msg) {
       log(`🛡️ ガードにより女王の交換が拒否されました`);
       break;
     case 'NOTIFY_TIMEOUT':
-      log(`⏰ ${getPlayerName(payload.playerId)} がタイムアウトしました`);
+      if (payload.autoAction === 'ホストの操作が行われませんでした') {
+        log(`⏰ ホストの操作が行われませんでした。自動的に進行します。`);
+        showToast('ホストの操作が行われませんでした');
+      } else {
+        log(`⏰ ${getPlayerName(payload.playerId)} がタイムアウトしました`);
+      }
+      break;
+    case 'WAITING_HOST_PROCEED':
+      showWaitingHostProceed(payload.targetPhase);
       break;
     case 'NOTIFY_THINK_TIME':
       log(`🤔 ${getPlayerName(payload.playerId)} が長考を使用しました（+2分）`);
@@ -334,12 +342,16 @@ function handleTurnChanged(payload) {
   // 手札表示を更新（ゲーム開始直後の表示確保）
   renderMyHand();
 
-  if (payload.currentTurnPlayerId === state.playerId) {
-    renderTurnActions();
-  } else {
-    const actionsEl = document.getElementById('game-actions');
-    const turnPlayerName = getPlayerName(payload.currentTurnPlayerId);
-    actionsEl.innerHTML = `<div style="text-align:center;color:#aaa;padding:12px;">🕐 ${turnPlayerName} のターンです。お待ちください…</div>`;
+  const phase = state.gameState?.phase;
+  const isEndingPhase = phase === 'ENDING_QUEEN' || phase === 'ENDING_REVEAL' || phase === 'FINISHED';
+  if (!isEndingPhase) {
+    if (payload.currentTurnPlayerId === state.playerId) {
+      renderTurnActions();
+    } else {
+      const actionsEl = document.getElementById('game-actions');
+      const turnPlayerName = getPlayerName(payload.currentTurnPlayerId);
+      actionsEl.innerHTML = `<div style="text-align:center;color:#aaa;padding:12px;">🕐 ${turnPlayerName} のターンです。お待ちください…</div>`;
+    }
   }
 }
 
@@ -426,7 +438,9 @@ function updatePhaseLabel(phase) {
     'STORY': 'ストーリーフェイズ', 'LAST_TURN': '最後の手番フェイズ',
     'ENDING_QUEEN': 'エンディング（女王特権）', 'ENDING_REVEAL': 'エンディング（リンゴ公開）'
   };
-  document.getElementById('phase-label').textContent = labels[phase] || phase;
+  const el = document.getElementById('phase-label');
+  el.textContent = labels[phase] || phase;
+  el.className = phase === 'LAST_TURN' ? 'last-turn' : '';
 }
 
 // === Render Players ===
