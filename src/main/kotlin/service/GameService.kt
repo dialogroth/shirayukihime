@@ -140,10 +140,7 @@ class GameService(
     }
 
     private fun buildTurnOrder(players: List<GamePlayer>): List<UUID> {
-        val sorted = players.sortedBy { it.seatOrder }
-        val startIndex = (0 until sorted.size).random()
-        return (sorted.subList(startIndex, sorted.size) + sorted.subList(0, startIndex))
-            .map { it.playerId }
+        return players.sortedBy { it.seatOrder }.map { it.playerId }
     }
 
     // ── ターン管理 ──────────────────────────────────────────────────

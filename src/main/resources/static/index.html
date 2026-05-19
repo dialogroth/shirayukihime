@@ -91,11 +91,18 @@
 <section id="screen-waiting" class="screen">
   <h2>ルーム: <span id="display-room-code"></span></h2>
   <div class="card">
-    <h3>参加者 (<span id="player-count">0</span>人)</h3>
-    <ul id="player-list"></ul>
+    <h3>参加者 (<span id="player-count">0</span>/<span id="max-players">0</span>人)</h3>
+    <div id="seat-circle"></div>
+    <button id="btn-shuffle-seats" style="display:none;" class="btn-secondary">🎲 ランダム配置</button>
     <button id="btn-start-game" style="display:none;" disabled>ゲーム開始</button>
     <p id="waiting-msg">ホストがゲームを開始するのを待っています…</p>
-    <button id="btn-disband" class="btn-danger">ルームを解散する</button>
+    <button id="btn-leave-room" class="btn-danger">ルームから抜ける</button>
+  </div>
+  <div id="room-disbanded-overlay" style="display:none;">
+    <div class="card" style="text-align:center;">
+      <p style="font-size:1.1rem;font-weight:bold;margin-bottom:12px;">ルームが解散されました</p>
+      <button id="btn-disbanded-home">ホームへ戻る</button>
+    </div>
   </div>
 </section>
 

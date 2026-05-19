@@ -104,6 +104,21 @@ function handleServerEvent(msg) {
       pollRoom();
       log(`${payload.userName} が切断しました`);
       break;
+    case 'ROOM_DISBANDED':
+      // ホスト以外に表示
+      if (!state.isHost) {
+        document.getElementById('room-disbanded-overlay').style.display = 'flex';
+      }
+      break;
+    case 'SEATS_SWAPPED':
+      // Re-poll to get updated seat orders
+      pollRoom();
+      break;
+    case 'DRAG_SEAT_UPDATE':
+      // Show drag indicator for other players
+      state.dragOverSeat = payload.overSeatIndex !== '' ? parseInt(payload.overSeatIndex) : null;
+      renderSeatCircle();
+      break;
     case 'GAME_STARTED':
       showScreen('game');
       state.thinkTimeUsed = false;
@@ -117,6 +132,9 @@ function handleServerEvent(msg) {
         state.gameState.players = payload.players;
         renderPlayers(payload.players);
       }
+      // 手札・リンゴ表示初期化
+      renderMyHand();
+      renderMyApple();
       break;
     case 'YOUR_INITIAL_INFO':
       handleInitialInfo(payload);
@@ -257,7 +275,7 @@ function handleInitialInfo(payload) {
 // === Game State Sync ===
 function handleGameStateSync(payload) {
   state.gameState = payload;
-  if (payload.myHand) {
+  if (payload.myHand !== undefined && payload.myHand !== null) {
     state.myHand = payload.myHand;
     renderMyHand();
   }
@@ -271,6 +289,9 @@ function handleGameStateSync(payload) {
 
   // Update actions if it's my turn
   if (payload.currentTurnPlayerId === state.playerId) {
+    renderTurnActions();
+  } else if (state.myHand.length >= 2) {
+    // カードを引いた直後でSYNCが来た場合（currentTurnPlayerIdがまだ自分の場合も含む）
     renderTurnActions();
   } else {
     const actionsEl = document.getElementById('game-actions');
@@ -291,6 +312,9 @@ function handleTurnChanged(payload) {
 
   // タイマー開始
   startTurnTimer(payload.timeoutSeconds || 180);
+
+  // 手札表示を更新（ゲーム開始直後の表示確保）
+  renderMyHand();
 
   if (payload.currentTurnPlayerId === state.playerId) {
     renderTurnActions();
@@ -519,6 +543,34 @@ function renderTurnActions() {
   container.appendChild(btnAbility);
 }
 
+// 最後の手番フェイズでの「戻る」用：カード選択UIを経由せず直接5つのアクションを表示
+function renderTurnActions_main() {
+  const container = document.getElementById('game-actions');
+  container.innerHTML = '';
+  const gs = state.gameState;
+  if (!gs) return;
+
+  const phase = gs.phase;
+  const canDraw = (phase === 'STORY' || phase === 'LAST_TURN') && gs.deckRemainingCount > 1;
+
+  const btnDraw = createBtn('① 山札を引く', () => sendEvent('ACTION_DRAW_CARD'));
+  btnDraw.disabled = !canDraw;
+  container.appendChild(btnDraw);
+  container.appendChild(createBtn('② 手札の交換', () => showTargetSelect('ACTION_EXCHANGE_HAND')));
+  container.appendChild(createBtn('③ リンゴの交換', () => showTargetSelect('ACTION_EXCHANGE_APPLE')));
+  container.appendChild(createBtn('④ リンゴ確認', () => sendEvent('ACTION_CHECK_OWN_APPLE')));
+
+  const canAbility = (state.role === 'GRAY' || state.role === 'LIGHT');
+  const btnAbility = createBtn('⑤ 能力発動', () => showAbilityUI());
+  btnAbility.disabled = !canAbility;
+  container.appendChild(btnAbility);
+
+  // 手札を使う/捨てるオプションへのショートカット
+  if (state.myHand.length >= 1) {
+    container.appendChild(createBtn('⑥ 手札を使う/捨てる', () => renderCardChoiceUI()));
+  }
+}
+
 function renderCardChoiceUI() {
   const container = document.getElementById('game-actions');
   const msg = state.myHand.length >= 2
@@ -553,6 +605,13 @@ function renderCardChoiceUI() {
 
     container.appendChild(row);
   });
+
+  // 最後の手番フェイズで手札1枚の場合は他の行動も選べるのでキャンセルを表示
+  if (state.myHand.length < 2) {
+    const cancelBtn = createBtn('← 戻る', () => renderTurnActions_main());
+    cancelBtn.classList.add('btn-secondary');
+    container.appendChild(cancelBtn);
+  }
 }
 
 // === Card Use UI ===
@@ -799,16 +858,16 @@ function log(msg) {
 async function pollRoom() {
   try {
     const data = await api('GET', '/' + state.roomCode);
-    const list = document.getElementById('player-list');
-    list.innerHTML = '';
-    data.players.forEach(p => {
-      const li = document.createElement('li');
-      li.textContent = p.userName;
-      if (p.isHost) li.innerHTML += ' <span class="badge badge-host">ホスト</span>';
-      if (!p.isConnected) li.innerHTML += ' <span class="badge badge-disconnected">切断中</span>';
-      list.appendChild(li);
-    });
+    const totalSeats = data.settings?.roles?.length || data.players.length;
     document.getElementById('player-count').textContent = data.players.length;
+    document.getElementById('max-players').textContent = totalSeats;
+
+    // Store room players for seat rendering
+    state.roomPlayers = data.players;
+    state.totalSeats = totalSeats;
+    if (!state.selectedRoles.length && data.settings?.roles) state.selectedRoles = data.settings.roles;
+
+    renderSeatCircle();
 
     // Enable start button when player count matches role count
     if (state.isHost) {
@@ -817,6 +876,91 @@ async function pollRoom() {
       btn.disabled = roleCount === 0 || data.players.length !== roleCount;
     }
   } catch(e) { console.error(e); }
+}
+
+function renderSeatCircle() {
+  const container = document.getElementById('seat-circle');
+  if (!container) return;
+  const players = state.roomPlayers || [];
+  const totalSeats = state.totalSeats || players.length || 4;
+  const radius = 100;
+  const centerX = 130;
+  const centerY = 130;
+
+  container.style.cssText = 'position:relative;width:260px;height:260px;margin:16px auto;';
+  container.innerHTML = '';
+
+  for (let i = 0; i < totalSeats; i++) {
+    // Start from 12 o'clock (-90deg), clockwise
+    const angle = (-90 + (360 / totalSeats) * i) * (Math.PI / 180);
+    const x = centerX + radius * Math.cos(angle) - 35;
+    const y = centerY + radius * Math.sin(angle) - 25;
+
+    const player = players.find(p => p.seatOrder === i);
+    const seat = document.createElement('div');
+    seat.className = 'seat' + (player ? ' occupied' : '') + (state.dragOverSeat === i ? ' drag-over' : '');
+    seat.style.cssText = `position:absolute;left:${x}px;top:${y}px;width:70px;height:50px;border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:0.7rem;background:${player ? '#2a4a3e' : '#333'};border:2px solid ${player ? '#10b981' : '#555'};color:#eee;cursor:${state.isHost && player ? 'grab' : 'default'};user-select:none;`;
+    seat.dataset.seatIndex = i;
+
+    const orderLabel = document.createElement('div');
+    orderLabel.style.cssText = 'font-size:0.6rem;color:#888;';
+    orderLabel.textContent = `#${i + 1}`;
+    seat.appendChild(orderLabel);
+
+    const nameLabel = document.createElement('div');
+    nameLabel.style.cssText = 'font-weight:bold;font-size:0.75rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:65px;';
+    nameLabel.textContent = player ? player.userName : '空席';
+    seat.appendChild(nameLabel);
+
+    if (player && player.isHost) {
+      const badge = document.createElement('div');
+      badge.style.cssText = 'font-size:0.55rem;color:#f59e0b;';
+      badge.textContent = 'ホスト';
+      seat.appendChild(badge);
+    }
+
+    // Drag-and-drop for host
+    if (state.isHost && player) {
+      seat.draggable = true;
+      seat.ondragstart = (e) => {
+        state.dragPlayerId = player.playerId;
+        state.dragFromSeat = i;
+        e.dataTransfer.effectAllowed = 'move';
+        seat.style.opacity = '0.5';
+        sendEvent('DRAG_SEAT', { dragPlayerId: player.playerId, overSeatIndex: i });
+      };
+      seat.ondragend = () => {
+        seat.style.opacity = '1';
+        state.dragPlayerId = null;
+        state.dragOverSeat = null;
+      };
+    }
+
+    seat.ondragover = (e) => {
+      e.preventDefault();
+      if (state.isHost && state.dragPlayerId) {
+        state.dragOverSeat = i;
+        sendEvent('DRAG_SEAT', { dragPlayerId: state.dragPlayerId, overSeatIndex: i });
+        renderSeatCircle();
+      }
+    };
+
+    seat.ondrop = (e) => {
+      e.preventDefault();
+      if (!state.isHost || !state.dragPlayerId) return;
+      const targetPlayer = players.find(p => p.seatOrder === i);
+      if (targetPlayer && targetPlayer.playerId !== state.dragPlayerId) {
+        sendEvent('SWAP_SEATS', { playerIdA: state.dragPlayerId, playerIdB: targetPlayer.playerId });
+      } else if (!targetPlayer) {
+        // Drop on empty seat - swap with the dragged player's original position
+        // This case needs special handling on server; for now just ignore
+      }
+      state.dragPlayerId = null;
+      state.dragOverSeat = null;
+    };
+
+    container.appendChild(seat);
+  }
 }
 
 // === Username validation ===
@@ -874,6 +1018,7 @@ document.getElementById('btn-do-create').onclick = async () => {
     state.isHost = true;
     document.getElementById('display-room-code').textContent = data.roomCode;
     document.getElementById('btn-start-game').style.display = 'block';
+    document.getElementById('btn-shuffle-seats').style.display = 'block';
     document.getElementById('waiting-msg').style.display = 'none';
     showScreen('waiting');
     connectWs();
@@ -933,13 +1078,24 @@ document.getElementById('btn-start-game').onclick = () => {
   sendEvent('GAME_START', {});
 };
 
+document.getElementById('btn-shuffle-seats').onclick = () => {
+  sendEvent('SHUFFLE_SEATS', {});
+};
+
 document.getElementById('btn-rematch').onclick = () => {
   sendEvent('REMATCH_REQUEST', {});
 };
 
 const btnBackToStart = document.getElementById('btn-back-to-start');
 if (btnBackToStart) btnBackToStart.onclick = () => { resetAndGoHome(); };
-document.getElementById('btn-disband').onclick = () => { resetAndGoHome(); };
+document.getElementById('btn-leave-room').onclick = () => {
+  if (state.isHost) {
+    if (!confirm('ルームを解散しますか？')) return;
+    sendEvent('DISBAND_ROOM');
+  }
+  resetAndGoHome();
+};
+document.getElementById('btn-disbanded-home').onclick = () => { resetAndGoHome(); };
 document.getElementById('btn-disband-result').onclick = () => { resetAndGoHome(); };
 
 function resetAndGoHome() {

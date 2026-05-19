@@ -206,5 +206,8 @@ object EventType {
     const val TURN_CHANGED = "TURN_CHANGED"
     const val GAME_RESULT = "GAME_RESULT"
     const val NOTIFY_REMATCH_STARTING = "NOTIFY_REMATCH_STARTING"
+    const val ROOM_DISBANDED = "ROOM_DISBANDED"
+    const val SEATS_SWAPPED = "SEATS_SWAPPED"
+    const val DRAG_SEAT_UPDATE = "DRAG_SEAT_UPDATE"
     const val ERROR = "ERROR"
 }

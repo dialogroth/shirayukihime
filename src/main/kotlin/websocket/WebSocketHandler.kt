@@ -167,5 +167,57 @@ private suspend fun handleClientMessage(
         ClientEventType.ACTION_THINK_TIME -> {
             gameService.handleThinkTime(roomId, playerId)
         }
+
+        ClientEventType.DISBAND_ROOM -> {
+            val room = roomRepository.findById(roomId) ?: return
+            if (room.hostPlayerId != playerId) return
+            val msg = WsMessage(EventType.ROOM_DISBANDED, kotlinx.serialization.json.JsonObject(emptyMap()))
+            connectionManager.broadcastExcept(roomId, playerId, msg)
+        }
+
+        ClientEventType.SWAP_SEATS -> {
+            val room = roomRepository.findById(roomId) ?: return
+            if (room.hostPlayerId != playerId) return
+            val playerIdA = payload["playerIdA"]?.jsonPrimitive?.content ?: return
+            val playerIdB = payload["playerIdB"]?.jsonPrimitive?.content ?: return
+            val pidA = UUID.fromString(playerIdA)
+            val pidB = UUID.fromString(playerIdB)
+            // Swap seat orders in DB
+            val playerA = playerRepository.findById(pidA) ?: return
+            val playerB = playerRepository.findById(pidB) ?: return
+            playerRepository.updateSeatOrder(pidA, playerB.seatOrder)
+            playerRepository.updateSeatOrder(pidB, playerA.seatOrder)
+            // Broadcast the swap to all
+            val swapMsg = WsMessage(EventType.SEATS_SWAPPED, Json.encodeToJsonElement(
+                mapOf("playerIdA" to playerIdA, "playerIdB" to playerIdB)
+            ))
+            connectionManager.broadcast(roomId, swapMsg)
+        }
+
+        ClientEventType.SHUFFLE_SEATS -> {
+            val room = roomRepository.findById(roomId) ?: return
+            if (room.hostPlayerId != playerId) return
+            val players = playerRepository.findByRoomId(roomId)
+            val shuffledOrders = players.map { it.seatOrder }.shuffled()
+            players.forEachIndexed { index, player ->
+                playerRepository.updateSeatOrder(player.id, shuffledOrders[index])
+            }
+            // Broadcast to all so they re-poll
+            val shuffleMsg = WsMessage(EventType.SEATS_SWAPPED, Json.encodeToJsonElement(
+                mapOf("shuffled" to "true")
+            ))
+            connectionManager.broadcast(roomId, shuffleMsg)
+        }
+
+        ClientEventType.DRAG_SEAT -> {
+            val room = roomRepository.findById(roomId) ?: return
+            if (room.hostPlayerId != playerId) return
+            val dragPlayerId = payload["dragPlayerId"]?.jsonPrimitive?.content ?: return
+            val overSeatIndex = payload["overSeatIndex"]?.jsonPrimitive?.intOrNull
+            val dragMsg = WsMessage(EventType.DRAG_SEAT_UPDATE, Json.encodeToJsonElement(
+                mapOf("dragPlayerId" to dragPlayerId, "overSeatIndex" to (overSeatIndex?.toString() ?: ""))
+            ))
+            connectionManager.broadcastExcept(roomId, playerId, dragMsg)
+        }
     }
 }

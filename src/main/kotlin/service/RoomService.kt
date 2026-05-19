@@ -64,6 +64,12 @@ class RoomService(
         if (playerRepository.existsUserNameInRoom(room.id, userName))
             error("DUPLICATE_USERNAME")
 
+        val settings = roomRepository.findSettings(room.id)
+        val maxPlayers = settings?.roles?.size ?: Int.MAX_VALUE
+        val currentCount = playerRepository.findByRoomId(room.id).size
+        if (currentCount >= maxPlayers)
+            error("ROOM_FULL")
+
         val seatOrder = playerRepository.nextSeatOrder(room.id)
         val playerId = playerRepository.create(room.id, userName, seatOrder)
 

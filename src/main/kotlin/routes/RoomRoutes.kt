@@ -82,6 +82,7 @@ fun Route.roomRoutes(
                     val (status, msg) = when (e.message) {
                         "ROOM_NOT_FOUND" -> HttpStatusCode.NotFound to "ルームが見つかりません"
                         "DUPLICATE_USERNAME" -> HttpStatusCode.Conflict to "そのユーザー名は既に使用されています"
+                        "ROOM_FULL" -> HttpStatusCode.Conflict to "満席です"
                         else -> HttpStatusCode.InternalServerError to "参加に失敗しました"
                     }
                     return@post call.respond(status, ErrorResponse(msg))

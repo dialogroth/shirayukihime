@@ -53,6 +53,12 @@ class PlayerRepository {
         }
     }
 
+    fun updateSeatOrder(id: UUID, newSeatOrder: Int) = transaction {
+        Players.update({ Players.id eq id }) {
+            it[Players.seatOrder] = newSeatOrder
+        }
+    }
+
     fun deleteDisconnected(roomId: UUID) = transaction {
         Players.deleteWhere { (Players.roomId eq roomId) and (Players.isConnected eq false) }
     }
