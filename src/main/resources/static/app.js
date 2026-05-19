@@ -299,16 +299,22 @@ function handleGameStateSync(payload) {
   if (payload.discardPile) renderDiscardPile(payload.discardPile);
   if (payload.phase) updatePhaseLabel(payload.phase);
 
-  // Update actions if it's my turn
-  if (payload.currentTurnPlayerId === state.playerId) {
-    renderTurnActions();
-  } else if (state.myHand.length >= 2) {
-    // カードを引いた直後でSYNCが来た場合（currentTurnPlayerIdがまだ自分の場合も含む）
-    renderTurnActions();
-  } else {
-    const actionsEl = document.getElementById('game-actions');
-    const turnPlayerName = getPlayerName(payload.currentTurnPlayerId);
-    actionsEl.innerHTML = `<div style="text-align:center;color:#aaa;padding:12px;">🕐 ${turnPlayerName} のターンです。お待ちください…</div>`;
+  // エンディング/結果フェーズ中はアクションUIを上書きしない
+  const phase = payload.phase;
+  const isEndingPhase = phase === 'ENDING_QUEEN' || phase === 'ENDING_REVEAL' || phase === 'FINISHED';
+
+  if (!isEndingPhase) {
+    // Update actions if it's my turn
+    if (payload.currentTurnPlayerId === state.playerId) {
+      renderTurnActions();
+    } else if (state.myHand.length >= 2) {
+      // カードを引いた直後でSYNCが来た場合（currentTurnPlayerIdがまだ自分の場合も含む）
+      renderTurnActions();
+    } else {
+      const actionsEl = document.getElementById('game-actions');
+      const turnPlayerName = getPlayerName(payload.currentTurnPlayerId);
+      actionsEl.innerHTML = `<div style="text-align:center;color:#aaa;padding:12px;">🕐 ${turnPlayerName} のターンです。お待ちください…</div>`;
+    }
   }
 }
 
