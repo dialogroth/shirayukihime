@@ -936,16 +936,23 @@ function renderSeatCircle() {
         seat.style.opacity = '1';
         state.dragPlayerId = null;
         state.dragOverSeat = null;
+        container.querySelectorAll('.seat').forEach(s => s.classList.remove('drag-over'));
       };
     }
 
     seat.ondragover = (e) => {
       e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
       if (state.isHost && state.dragPlayerId) {
+        // Remove highlight from all seats, add to this one
+        container.querySelectorAll('.seat').forEach(s => s.classList.remove('drag-over'));
+        seat.classList.add('drag-over');
         state.dragOverSeat = i;
-        sendEvent('DRAG_SEAT', { dragPlayerId: state.dragPlayerId, overSeatIndex: i });
-        renderSeatCircle();
       }
+    };
+
+    seat.ondragleave = () => {
+      seat.classList.remove('drag-over');
     };
 
     seat.ondrop = (e) => {
