@@ -237,9 +237,16 @@ class GameService(
     }
 
     private suspend fun advanceLastTurn(roomId: UUID, state: GameState) {
-        // 現在のプレイヤーをプレイ済みに追加
+        // 現在のプレイヤーをプレイ済みに追加（生存プレイヤーのみ）
         val currentPlayerId = state.currentTurnPlayerId()
-        val playedSet = state.lastTurnPlayersPlayed + currentPlayerId
+        val currentPlayer = state.players[currentPlayerId]
+
+        // 生存状態のプレイヤーのみをプレイ済みに記録
+        val playedSet = if (currentPlayer?.isAlive == true) {
+            state.lastTurnPlayersPlayed + currentPlayerId
+        } else {
+            state.lastTurnPlayersPlayed
+        }
         GameStateManager.update(roomId) { it.copy(lastTurnPlayersPlayed = playedSet) }
 
         // 全ての生存プレイヤーがプレイ済みなら一周完了 → エンディングへ
@@ -398,16 +405,16 @@ class GameService(
 
         // 山札が残り1枚になったらLAST_TURNへ（次のプレイヤーから開始）
         if (newState.deckOrder.size == 1 && newState.phase == GamePhase.STORY) {
-            broadcast(roomId, EventType.PHASE_CHANGED, PhaseChangedPayload("LAST_TURN", playerId.toString()))
+            val nextIdx = nextAliveIndex(newState, newState.currentTurnIndex)
             GameStateManager.update(roomId) { s ->
-                val nextIdx = nextAliveIndex(s, s.currentTurnIndex)
                 s.copy(
                     phase = GamePhase.LAST_TURN,
                     currentTurnIndex = nextIdx,
                     lastTurnStartPlayerIndex = nextIdx,
-                    lastTurnPlayersPlayed = setOf(playerId)
+                    lastTurnPlayersPlayed = emptySet()
                 )
             }
+            broadcast(roomId, EventType.PHASE_CHANGED, PhaseChangedPayload("LAST_TURN", playerId.toString()))
             cancelTurnTimer(roomId)
             val updatedState = GameStateManager.get(roomId) ?: return
             broadcastGameStateSync(roomId, updatedState)
