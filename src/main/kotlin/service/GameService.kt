@@ -276,7 +276,7 @@ class GameService(
                 phase = GamePhase.LAST_TURN,
                 currentTurnIndex = nextIdx,
                 lastTurnStartPlayerIndex = nextIdx,
-                lastTurnPlayersPlayed = emptySet()
+                lastTurnPlayersPlayed = setOf(triggerPlayerId)
             )
         } ?: return
 
@@ -398,16 +398,20 @@ class GameService(
 
         // 山札が残り1枚になったらLAST_TURNへ（次のプレイヤーから開始）
         if (newState.deckOrder.size == 1 && newState.phase == GamePhase.STORY) {
+            broadcast(roomId, EventType.PHASE_CHANGED, PhaseChangedPayload("LAST_TURN", playerId.toString()))
             GameStateManager.update(roomId) { s ->
+                val nextIdx = nextAliveIndex(s, s.currentTurnIndex)
                 s.copy(
                     phase = GamePhase.LAST_TURN,
-                    lastTurnStartPlayerIndex = s.currentTurnIndex
+                    currentTurnIndex = nextIdx,
+                    lastTurnStartPlayerIndex = nextIdx,
+                    lastTurnPlayersPlayed = setOf(playerId)
                 )
             }
-            broadcast(roomId, EventType.PHASE_CHANGED, PhaseChangedPayload("LAST_TURN", playerId.toString()))
-
-
-            startTurnTimer(roomId, playerId)
+            cancelTurnTimer(roomId)
+            val updatedState = GameStateManager.get(roomId) ?: return
+            broadcastGameStateSync(roomId, updatedState)
+            startTurn(roomId)
         } else {
             startTurnTimer(roomId, playerId)
         }
@@ -895,7 +899,6 @@ class GameService(
         }
 
         GameStateManager.update(roomId) { it.copy(queenSpecialDone = true) }
-        broadcast(roomId, EventType.PHASE_CHANGED, PhaseChangedPayload("ENDING_REVEAL", null))
         revealAllApplesAndProceed(roomId)
     }
 
