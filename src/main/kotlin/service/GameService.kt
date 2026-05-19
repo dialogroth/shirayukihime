@@ -776,6 +776,22 @@ class GameService(
     // ── エンディングフェイズ ───────────────────────────────────────────
 
     private suspend fun startEndingPhase(roomId: UUID) {
+        // 最後の手番フェイズ終了 → 全員のリンゴを公開（死亡判定はしない）
+        val preState = GameStateManager.get(roomId) ?: return
+        GameStateManager.update(roomId) { s ->
+            val revealedApples = s.apples.map { it.copy(isPubliclyRevealed = true) }
+            s.copy(apples = revealedApples)
+        }
+        // 全員にリンゴ公開を通知
+        preState.apples.forEach { apple ->
+            broadcast(roomId, EventType.NOTIFY_APPLE_PUBLICLY_REVEALED, NotifyApplePubliclyRevealedPayload(
+                apple.appleId.toString(), apple.currentHolderPlayerId.toString(), apple.isPoisoned
+            ))
+        }
+        val syncState = GameStateManager.get(roomId) ?: return
+        broadcastGameStateSync(roomId, syncState)
+
+        // 女王特権フェイズへ移行
         val state = GameStateManager.update(roomId) { it.copy(phase = GamePhase.ENDING_QUEEN) } ?: return
         broadcast(roomId, EventType.PHASE_CHANGED, PhaseChangedPayload("ENDING_QUEEN", null))
 

@@ -539,9 +539,11 @@ function renderTurnActions() {
   btnAbility.disabled = !canAbility;
   container.appendChild(btnAbility);
 
-  // ⑥ 手札を使う/捨てる
+  // ⑥ 手札を使う/捨てる（最後の手番フェイズのみ活性）
   if (state.myHand.length >= 1) {
-    container.appendChild(createBtn('⑥ 手札を使う/捨てる', () => renderCardChoiceUI()));
+    const btnHandUse = createBtn('⑥ 手札を使う/捨てる', () => renderCardChoiceUI());
+    btnHandUse.disabled = (phase !== 'LAST_TURN');
+    container.appendChild(btnHandUse);
   }
 }
 
@@ -577,9 +579,11 @@ function renderTurnActions_main() {
   btnAbility.disabled = !canAbility;
   container.appendChild(btnAbility);
 
-  // 手札を使う/捨てるオプションへのショートカット
+  // 手札を使う/捨てるオプション（最後の手番フェイズのみ活性）
   if (state.myHand.length >= 1) {
-    container.appendChild(createBtn('⑥ 手札を使う/捨てる', () => renderCardChoiceUI()));
+    const btnHandUse = createBtn('⑥ 手札を使う/捨てる', () => renderCardChoiceUI());
+    btnHandUse.disabled = (phase !== 'LAST_TURN');
+    container.appendChild(btnHandUse);
   }
 }
 
