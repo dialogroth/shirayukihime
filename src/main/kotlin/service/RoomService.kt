@@ -76,7 +76,6 @@ class RoomService(
     }
 
     private fun generateRoomCode(): String {
-        val chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-        return (1..6).map { chars.random() }.joinToString("")
+        return (1..6).map { (0..9).random() }.joinToString("")
     }
 }

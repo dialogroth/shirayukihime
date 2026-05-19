@@ -93,6 +93,28 @@ fun Route.roomRoutes(
                     roomCode = result.roomCode
                 ))
             }
+
+            post("/rejoin") {
+                val roomCode = call.parameters["roomCode"] ?: return@post call.respond(HttpStatusCode.BadRequest, ErrorResponse("ルームコードが必要です"))
+                val req = call.receive<RejoinRoomRequest>()
+
+                if (req.userName.isBlank())
+                    return@post call.respond(HttpStatusCode.BadRequest, ErrorResponse("ユーザー名を入力してください"))
+
+                val room = roomRepository.findByCode(roomCode)
+                    ?: return@post call.respond(HttpStatusCode.NotFound, ErrorResponse("ルームが見つかりません"))
+
+                val players = playerRepository.findByRoomId(room.id)
+                val player = players.find { it.userName == req.userName }
+                    ?: return@post call.respond(HttpStatusCode.NotFound, ErrorResponse("そのユーザー名のプレイヤーが見つかりません"))
+
+                call.respond(HttpStatusCode.OK, RejoinRoomResponse(
+                    roomId = room.id.toString(),
+                    playerId = player.id.toString(),
+                    roomCode = room.roomCode,
+                    status = room.status.name
+                ))
+            }
         }
     }
 }

@@ -17,6 +17,7 @@
     <div class="btn-group">
       <button id="btn-create-room" disabled>部屋を作る</button>
       <button id="btn-join-room" disabled>部屋に入る</button>
+      <button id="btn-rejoin-room" disabled>部屋に復帰する</button>
     </div>
   </div>
 </section>
@@ -69,8 +70,19 @@
   <h2>ルームに参加</h2>
   <div class="card">
     <label>ルームコード</label>
-    <input type="text" id="input-room-code" maxlength="6" placeholder="6桁のコードを入力">
+    <input type="text" id="input-room-code" maxlength="6" placeholder="6桁の数字を入力" inputmode="numeric" pattern="[0-9]{6}">
     <button id="btn-do-join">参加する</button>
+    <button class="btn-back" data-back="start">戻る</button>
+  </div>
+</section>
+
+<!-- ルーム復帰画面 -->
+<section id="screen-rejoin" class="screen">
+  <h2>部屋に復帰する</h2>
+  <div class="card">
+    <label>ルームコード</label>
+    <input type="text" id="input-rejoin-code" maxlength="6" placeholder="6桁の数字を入力" inputmode="numeric" pattern="[0-9]{6}">
+    <button id="btn-do-rejoin">復帰する</button>
     <button class="btn-back" data-back="start">戻る</button>
   </div>
 </section>
@@ -90,6 +102,7 @@
 <!-- ゲームメイン画面 -->
 <section id="screen-game" class="screen">
   <div id="game-header">
+    <span id="room-code-label"></span>
     <span id="phase-label">ストーリーフェイズ</span>
     <span id="turn-label"></span>
     <span id="timer-label"></span>
@@ -109,8 +122,26 @@
 
   <div id="discard-pile-toggle">
     <button id="btn-show-discard" class="btn-secondary">捨て山を見る</button>
+    <button id="btn-show-reference" class="btn-secondary">役職一覧</button>
   </div>
   <div id="discard-pile" style="display:none;"></div>
+
+  <div id="role-reference" style="display:none;">
+    <table class="ref-table">
+      <thead><tr><th>役職</th><th>陣営</th><th>🍎</th><th>🍄</th><th>特殊能力</th></tr></thead>
+      <tbody>
+        <tr><td>白雪姫</td><td>白雪姫</td><td>好き</td><td>嫌い</td><td>なし</td></tr>
+        <tr><td>女王</td><td>女王</td><td>好き</td><td>嫌い</td><td>エンディング特権</td></tr>
+        <tr><td>グリーン</td><td>白雪姫</td><td>嫌い</td><td>好き</td><td>白雪姫が誰かわかる</td></tr>
+        <tr><td>ブラック</td><td>女王</td><td>嫌い</td><td>好き</td><td>毒リンゴの位置がわかる</td></tr>
+        <tr><td>ブラウン</td><td>白雪姫</td><td>好き</td><td>好き</td><td>なし</td></tr>
+        <tr><td>グレイ</td><td>白雪姫</td><td>嫌い</td><td>好き</td><td>保護（1回）</td></tr>
+        <tr><td>ネイビー</td><td>女王</td><td>自由</td><td>自由</td><td>嘘がつける</td></tr>
+        <tr><td>ロゼ</td><td>第三</td><td>嫌い</td><td>嫌い</td><td>なし</td></tr>
+        <tr><td>ライト</td><td>白雪姫</td><td>好き</td><td>嫌い</td><td>リンゴ交換（1回）</td></tr>
+      </tbody>
+    </table>
+  </div>
 
   <div id="game-log"></div>
 </section>

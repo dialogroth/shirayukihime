@@ -69,6 +69,9 @@ data class NotifyUseCardPayload(val playerId: String, val cardType: String, val 
 data class NotifyDiscardCardPayload(val playerId: String, val cardType: String)
 
 @Serializable
+data class NotifyThinkTimePayload(val playerId: String, val newTimeoutSeconds: Int)
+
+@Serializable
 data class NotifyExchangeHandPayload(val playerIdA: String, val playerIdB: String)
 
 @Serializable
@@ -196,6 +199,7 @@ object EventType {
     const val NOTIFY_KNIGHT_BLOCKED = "NOTIFY_KNIGHT_BLOCKED"
     const val NOTIFY_GUARD_ACTIVATED = "NOTIFY_GUARD_ACTIVATED"
     const val NOTIFY_TIMEOUT = "NOTIFY_TIMEOUT"
+    const val NOTIFY_THINK_TIME = "NOTIFY_THINK_TIME"
     const val REQUEST_PREFERENCE = "REQUEST_PREFERENCE"
     const val REQUEST_QUEEN_EXCHANGE = "REQUEST_QUEEN_EXCHANGE"
     const val PHASE_CHANGED = "PHASE_CHANGED"

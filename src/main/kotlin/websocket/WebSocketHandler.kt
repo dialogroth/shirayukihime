@@ -163,5 +163,9 @@ private suspend fun handleClientMessage(
             val targetId = payload["targetPlayerId"]?.jsonPrimitive?.content?.let { UUID.fromString(it) } ?: return
             gameService.handleQueenExchangeResponse(roomId, playerId, targetId)
         }
+
+        ClientEventType.ACTION_THINK_TIME -> {
+            gameService.handleThinkTime(roomId, playerId)
+        }
     }
 }

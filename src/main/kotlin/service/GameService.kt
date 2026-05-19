@@ -153,15 +153,6 @@ class GameService(
         val currentPlayerId = state.currentTurnPlayerId()
         val player = state.players[currentPlayerId] ?: return
 
-        // 呪いの指輪チェック（最後の手番フェイズ）
-        if (state.phase == GamePhase.LAST_TURN) {
-            val hasCursedRing = state.handOf(currentPlayerId).any { it.cardType == CardType.CURSED_RING }
-            if (hasCursedRing) {
-                killPlayer(roomId, currentPlayerId, "CURSED_RING")
-                advanceTurn(roomId)
-                return
-            }
-        }
 
         // ロープスキップチェック
         if (player.skipNextTurn) {
@@ -173,6 +164,18 @@ class GameService(
             advanceTurn(roomId)
             return
             // 注：グレイの保護はスキップされた手番では解除されない（要件通り）
+        }
+
+        // 呪いの指輪チェック：最後の手番フェイズで手番が回ってきた瞬間に持っていれば即死
+        if (state.phase == GamePhase.LAST_TURN) {
+            val hasCursedRing = state.handOf(currentPlayerId).any { it.cardType == CardType.CURSED_RING }
+            if (hasCursedRing) {
+                killPlayer(roomId, currentPlayerId, "CURSED_RING")
+                val newState = GameStateManager.get(roomId) ?: return
+                broadcastGameStateSync(roomId, newState)
+                advanceTurn(roomId)
+                return
+            }
         }
 
         // グレイの保護リセット（スキップされなかった本来の手番開始時）
@@ -244,15 +247,19 @@ class GameService(
     private suspend fun transitionToLastTurn(roomId: UUID, triggerPlayerId: UUID) {
         val state = GameStateManager.update(roomId) { s ->
             val triggerIndex = s.turnOrder.indexOf(triggerPlayerId)
+            val nextIdx = nextAliveIndex(s, triggerIndex)
             s.copy(
                 phase = GamePhase.LAST_TURN,
-                currentTurnIndex = triggerIndex,
-                lastTurnStartPlayerIndex = triggerIndex
+                currentTurnIndex = nextIdx,
+                lastTurnStartPlayerIndex = nextIdx
             )
         } ?: return
 
         broadcast(roomId, EventType.PHASE_CHANGED, PhaseChangedPayload("LAST_TURN", triggerPlayerId.toString()))
-        broadcastGameStateSync(roomId, state)
+
+
+        val updatedState = GameStateManager.get(roomId) ?: return
+        broadcastGameStateSync(roomId, updatedState)
         startTurn(roomId)
     }
 
@@ -268,6 +275,27 @@ class GameService(
 
     private fun cancelTurnTimer(roomId: UUID) {
         turnTimerJobs.remove(roomId)?.cancel()
+    }
+
+    suspend fun handleThinkTime(roomId: UUID, playerId: UUID) {
+        val state = GameStateManager.get(roomId) ?: return sendError(roomId, playerId, "GAME_NOT_STARTED", "ゲームが開始されていません")
+        if (!isCurrentTurn(state, playerId)) return sendError(roomId, playerId, "NOT_YOUR_TURN", "自分の手番ではありません")
+        val player = state.players[playerId] ?: return
+        if (player.thinkTimeUsed) return sendError(roomId, playerId, "ALREADY_USED", "長考は1ゲームに1回のみ使用可能です")
+
+        // プレイヤーの長考フラグを更新
+        GameStateManager.update(roomId) { s ->
+            s.copy(players = s.players + (playerId to player.copy(thinkTimeUsed = true)))
+        }
+
+        // ターンタイマーをキャンセルして+2分で再スタート
+        cancelTurnTimer(roomId)
+        turnTimerJobs[roomId] = scope.launch {
+            delay(120_000)
+            handleTurnTimeout(roomId, playerId)
+        }
+
+        broadcast(roomId, EventType.NOTIFY_THINK_TIME, NotifyThinkTimePayload(playerId.toString(), 120))
     }
 
     private suspend fun handleTurnTimeout(roomId: UUID, playerId: UUID) {
@@ -322,6 +350,7 @@ class GameService(
         val state = GameStateManager.get(roomId) ?: return sendError(roomId, playerId, "GAME_NOT_STARTED", "ゲームが開始されていません")
         if (!isCurrentTurn(state, playerId)) return sendError(roomId, playerId, "NOT_YOUR_TURN", "自分の手番ではありません")
         if (state.deckOrder.isEmpty()) return sendError(roomId, playerId, "INVALID_PHASE", "山札がありません")
+        if (state.deckOrder.size <= 1) return sendError(roomId, playerId, "INVALID_PHASE", "山札の最後の1枚は引けません")
 
         val cardId = state.deckOrder.first()
         val newState = GameStateManager.update(roomId) { s ->
@@ -342,15 +371,18 @@ class GameService(
         sendGameStateSyncTo(roomId, playerId, newState)
         broadcastGameStateSyncExcept(roomId, playerId, newState)
 
-        // 山札が尽きたらLAST_TURNへ（ただしカード使用/廃棄はまだ待つ）
-        if (newState.deckOrder.isEmpty()) {
+        // 山札が残り1枚になったらLAST_TURNへ（次のプレイヤーから開始）
+        if (newState.deckOrder.size == 1 && newState.phase == GamePhase.STORY) {
+            val nextIdx = nextAliveIndex(newState, newState.currentTurnIndex)
             GameStateManager.update(roomId) { s ->
                 s.copy(
                     phase = GamePhase.LAST_TURN,
-                    lastTurnStartPlayerIndex = s.currentTurnIndex
+                    lastTurnStartPlayerIndex = nextIdx
                 )
             }
             broadcast(roomId, EventType.PHASE_CHANGED, PhaseChangedPayload("LAST_TURN", playerId.toString()))
+
+
             startTurnTimer(roomId, playerId)
         } else {
             startTurnTimer(roomId, playerId)
@@ -374,6 +406,9 @@ class GameService(
         if (cardType == CardType.CURSED_RING)
             return sendError(roomId, playerId, "INVALID_PHASE", "呪いの指輪は使用できません")
 
+        if (cardType == CardType.GUARD || cardType == CardType.KNIGHT)
+            return sendError(roomId, playerId, "INVALID_PHASE", "このカードは使用できません（受動効果のみ）")
+
         if (cardType == CardType.POISON_COMB && state.phase == GamePhase.STORY)
             return sendError(roomId, playerId, "INVALID_PHASE", "毒の櫛は最後の手番フェイズ専用です")
 
@@ -382,6 +417,12 @@ class GameService(
         when (cardType) {
             CardType.APPLE_QUESTION, CardType.MUSHROOM_QUESTION -> {
                 val targetId = UUID.fromString(params["targetPlayerId"] ?: return)
+                val targetPlayer = state.players[targetId] ?: return sendError(roomId, playerId, "INVALID_TARGET", "無効なターゲットです")
+                // 既に同じ質問に答えたプレイヤーには質問できない
+                if (cardType == CardType.APPLE_QUESTION && targetPlayer.applePreferenceAnswer != null)
+                    return sendError(roomId, playerId, "ALREADY_ANSWERED", "そのプレイヤーは既にリンゴの質問に答えています")
+                if (cardType == CardType.MUSHROOM_QUESTION && targetPlayer.mushroomPreferenceAnswer != null)
+                    return sendError(roomId, playerId, "ALREADY_ANSWERED", "そのプレイヤーは既にきのこの質問に答えています")
                 moveCardToDiscard(roomId, cardId)
                 requestPreference(roomId, playerId, targetId, cardType)
                 return // ターン終了はレスポンス受信後
@@ -553,7 +594,9 @@ class GameService(
     // true を返した場合は内部でフェイズ遷移済みのためターン進行不要
     private suspend fun handleItadakimasu(roomId: UUID, playerId: UUID, cardId: UUID, count: Int): Boolean {
         val state = GameStateManager.get(roomId) ?: return false
-        val actualCount = minOf(count, state.deckOrder.size)
+        val maxDiscardable = maxOf(0, state.deckOrder.size - 1) // 最後の1枚は捨てられない
+        val actualCount = minOf(count, maxDiscardable)
+        if (actualCount == 0) return false
 
         moveCardToDiscard(roomId, cardId)
         val deckDrop = state.deckOrder.take(actualCount)
@@ -565,7 +608,7 @@ class GameService(
         }
 
         val newState = GameStateManager.get(roomId) ?: return false
-        if (newState.deckOrder.isEmpty()) {
+        if (newState.deckOrder.size <= 1 && state.deckOrder.size > 1 && state.phase == GamePhase.STORY) {
             broadcastGameStateSync(roomId, newState)
             transitionToLastTurn(roomId, playerId)
             return true // フェイズ遷移済み
@@ -771,6 +814,7 @@ class GameService(
             .filter { it.isAlive && it.playerId != queenPlayer.playerId }
             .map { it.playerId.toString() }
         pendingQueenExchange[roomId] = true
+        broadcastTurnChanged(roomId, queenPlayer.playerId)
         sendTo(roomId, queenPlayer.playerId, EventType.REQUEST_QUEEN_EXCHANGE,
             RequestQueenExchangePayload(targets))
 
@@ -941,7 +985,13 @@ class GameService(
         broadcastGameStateSync(roomId, newState)
 
         if (state.currentTurnPlayerId() == playerId) {
-            // 手番中の切断 → 1分タイマーはstartTurnで管理
+            // 手番中の切断 → ターンタイマーをキャンセルし、1分タイマー開始
+            cancelTurnTimer(roomId)
+            val job = scope.launch {
+                delay(60_000)
+                handleDisconnectTimeout(roomId, playerId)
+            }
+            disconnectTimerJobs[playerId] = job
         } else {
             // 手番外での切断 → 1分タイマー開始（白雪姫も含む全員対象）
             val job = scope.launch {

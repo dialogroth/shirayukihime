@@ -60,3 +60,15 @@ data class RoomSettingsInfo(
 
 @Serializable
 data class ErrorResponse(val error: String)
+
+@Serializable
+data class RejoinRoomRequest(val userName: String)
+
+@Serializable
+data class RejoinRoomResponse(
+    val roomId: String,
+    val playerId: String,
+    val roomCode: String,
+    val status: String
+)
+

@@ -18,5 +18,6 @@ data class GamePlayer(
     val isProtected: Boolean = false,
     val skipNextTurn: Boolean = false,
     val applePreferenceAnswer: Boolean? = null,
-    val mushroomPreferenceAnswer: Boolean? = null
+    val mushroomPreferenceAnswer: Boolean? = null,
+    val thinkTimeUsed: Boolean = false
 )

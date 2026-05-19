@@ -116,3 +116,48 @@ ul li:last-child { border-bottom: none; }
 #result-details .result-player:last-child { border-bottom: none; }
 .winner-badge { color: #f59e0b; }
 
+@keyframes pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.15); }
+}
+
+#phase-label.last-turn {
+  background: #dc2626;
+  color: #fff;
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-weight: bold;
+  font-size: 1.1rem;
+  animation: pulse 1s 3;
+}
+
+#role-reference {
+  margin: 8px 0;
+  padding: 8px;
+  background: #2a2a3e;
+  border-radius: 8px;
+  overflow-x: auto;
+}
+
+.ref-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+}
+
+.ref-table th, .ref-table td {
+  padding: 4px 6px;
+  border: 1px solid #444;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.ref-table th {
+  background: #333;
+  color: #f59e0b;
+}
+
+.ref-table td:first-child {
+  font-weight: bold;
+}
+

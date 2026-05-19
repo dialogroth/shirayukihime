@@ -15,7 +15,11 @@ let state = {
   gameState: null,
   initialInfo: null,
   selectedRoles: [],
-  pollInterval: null
+  pollInterval: null,
+  // Timer
+  turnTimer: null,
+  turnTimeRemaining: 0,
+  thinkTimeUsed: false
 };
 
 const CARD_NAMES = {
@@ -102,7 +106,17 @@ function handleServerEvent(msg) {
       break;
     case 'GAME_STARTED':
       showScreen('game');
-      if (payload.players) renderPlayers(payload.players);
+      state.thinkTimeUsed = false;
+      // ルームコードをゲーム画面に表示
+      document.getElementById('room-code-label').textContent = `🏠 ${state.roomCode}`;
+      // ログをクリア（ゲーム開始時からのみ表示）
+      const logEl = document.getElementById('game-log');
+      if (logEl) logEl.innerHTML = '';
+      if (payload.players) {
+        if (!state.gameState) state.gameState = {};
+        state.gameState.players = payload.players;
+        renderPlayers(payload.players);
+      }
       break;
     case 'YOUR_INITIAL_INFO':
       handleInitialInfo(payload);
@@ -135,7 +149,18 @@ function handleServerEvent(msg) {
       log(`${getPlayerName(payload.playerId)} がカードを引きました（残り${payload.deckRemainingCount}枚）`);
       break;
     case 'NOTIFY_USE_CARD':
-      log(`${getPlayerName(payload.playerId)} が「${CARD_NAMES[payload.cardType] || payload.cardType}」を使用しました`);
+      const cardName = CARD_NAMES[payload.cardType] || payload.cardType;
+      const targetName = payload.params?.targetPlayerId ? getPlayerName(payload.params.targetPlayerId) : null;
+      if (targetName) {
+        log(`${getPlayerName(payload.playerId)} が ${targetName} に「${cardName}」を使用しました`);
+      } else {
+        log(`${getPlayerName(payload.playerId)} が「${cardName}」を使用しました`);
+      }
+      // 質問カードの場合、待機中のプレイヤーに状況を表示
+      if ((payload.cardType === 'APPLE_QUESTION' || payload.cardType === 'MUSHROOM_QUESTION') && payload.params?.targetPlayerId !== state.playerId) {
+        const actionsEl = document.getElementById('game-actions');
+        actionsEl.innerHTML = `<div style="text-align:center;color:#aaa;padding:12px;">🔮 ${getPlayerName(payload.playerId)} が ${targetName} に「${cardName}」を聞いています。回答待ち…</div>`;
+      }
       break;
     case 'NOTIFY_DISCARD_CARD':
       log(`${getPlayerName(payload.playerId)} が「${CARD_NAMES[payload.cardType] || payload.cardType}」を捨てました`);
@@ -182,6 +207,11 @@ function handleServerEvent(msg) {
     case 'NOTIFY_TIMEOUT':
       log(`⏰ ${getPlayerName(payload.playerId)} がタイムアウトしました`);
       break;
+    case 'NOTIFY_THINK_TIME':
+      log(`🤔 ${getPlayerName(payload.playerId)} が長考を使用しました（+2分）`);
+      if (payload.playerId === state.playerId) state.thinkTimeUsed = true;
+      state.turnTimeRemaining += payload.newTimeoutSeconds;
+      break;
     case 'GAME_RESULT':
       showGameResult(payload);
       break;
@@ -210,8 +240,15 @@ function handleInitialInfo(payload) {
   const roleInfo = document.getElementById('role-info');
   let info = `あなたの役職: <strong>${ROLE_NAMES[payload.role]}</strong>（${FACTION_NAMES[payload.faction]}）`;
   if (payload.snowWhitePlayerId) info += `<br>👑 白雪姫: ${getPlayerName(payload.snowWhitePlayerId)}`;
-  if (payload.poisonAppleHolderIds) info += `<br>☠️ 毒リンゴ所持: ${payload.poisonAppleHolderIds.map(id => getPlayerName(id)).join(', ')}`;
   roleInfo.innerHTML = info;
+  roleInfo.style.cursor = 'help';
+  const roleDesc = ROLE_DESCRIPTIONS[payload.role] || '';
+  roleInfo.onmouseenter = (e) => showTooltip(e, roleDesc);
+  roleInfo.onmouseleave = () => hideTooltip();
+  roleInfo.oncontextmenu = (e) => { e.preventDefault(); showTooltip(e, roleDesc); setTimeout(hideTooltip, 3000); };
+  let rolePress;
+  roleInfo.ontouchstart = (e) => { rolePress = setTimeout(() => showTooltip(e, roleDesc), 500); };
+  roleInfo.ontouchend = () => { clearTimeout(rolePress); setTimeout(hideTooltip, 3000); };
 
   renderMyApple();
   renderMyHand();
@@ -252,6 +289,9 @@ function handleTurnChanged(payload) {
   document.getElementById('turn-label').textContent =
     payload.currentTurnPlayerId === state.playerId ? '🎯 あなたのターン' : `${name} のターン`;
 
+  // タイマー開始
+  startTurnTimer(payload.timeoutSeconds || 180);
+
   if (payload.currentTurnPlayerId === state.playerId) {
     renderTurnActions();
   } else {
@@ -261,13 +301,82 @@ function handleTurnChanged(payload) {
   }
 }
 
+// === Turn Timer ===
+function startTurnTimer(seconds) {
+  stopTurnTimer();
+  state.turnTimeRemaining = seconds;
+  renderTimer();
+  state.turnTimer = setInterval(() => {
+    state.turnTimeRemaining--;
+    renderTimer();
+    if (state.turnTimeRemaining <= 0) stopTurnTimer();
+  }, 1000);
+}
+
+function stopTurnTimer() {
+  if (state.turnTimer) {
+    clearInterval(state.turnTimer);
+    state.turnTimer = null;
+  }
+}
+
+function renderTimer() {
+  const el = document.getElementById('timer-label');
+  const sec = state.turnTimeRemaining;
+  const min = Math.floor(sec / 60);
+  const s = sec % 60;
+  el.textContent = `⏱ ${min}:${s.toString().padStart(2, '0')}`;
+
+  // 残り1分で赤色警告
+  if (sec <= 60) {
+    el.style.color = '#dc2626';
+    el.style.fontWeight = 'bold';
+  } else {
+    el.style.color = '';
+    el.style.fontWeight = '';
+  }
+
+  // 残り15秒で長考ボタン表示（自分の手番のみ、未使用の場合）
+  const thinkBtn = document.getElementById('btn-think-time');
+  if (thinkBtn) thinkBtn.remove();
+  if (sec <= 15 && sec > 0 && !state.thinkTimeUsed &&
+      state.gameState && state.gameState.currentTurnPlayerId === state.playerId) {
+    const btn = document.createElement('button');
+    btn.id = 'btn-think-time';
+    btn.textContent = '🤔 長考（+2分）';
+    btn.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:9999;background:#f59e0b;color:#000;font-weight:bold;padding:10px 20px;border-radius:8px;border:none;cursor:pointer;animation:pulse 0.8s infinite;';
+    btn.onclick = () => {
+      sendEvent('ACTION_THINK_TIME');
+      btn.remove();
+    };
+    document.body.appendChild(btn);
+  }
+}
+
 // === Phase Changed ===
 function handlePhaseChanged(payload) {
   updatePhaseLabel(payload.newPhase);
-  if (payload.newPhase === 'ENDING_QUEEN' || payload.newPhase === 'ENDING_REVEAL') {
-    // Stay on game screen, show ending info in log
+  if (payload.newPhase === 'LAST_TURN') {
+    log('⚠️ === 最後の手番フェイズに突入しました！ ===');
+    const label = document.getElementById('phase-label');
+    label.className = 'last-turn';
+    // 大きな通知オーバーレイを表示
+    showPhaseOverlay('⚠️ 最後の手番フェイズ突入！');
+  } else if (payload.newPhase === 'ENDING_QUEEN' || payload.newPhase === 'ENDING_REVEAL') {
     log(`--- ${payload.newPhase === 'ENDING_QUEEN' ? 'エンディング: 女王の特権' : 'エンディング: リンゴ公開'} ---`);
+    showPhaseOverlay(payload.newPhase === 'ENDING_QUEEN' ? '👑 エンディング: 女王の特権' : '🍎 エンディング: リンゴ公開');
   }
+}
+
+function showPhaseOverlay(message) {
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;z-index:9999;';
+  const box = document.createElement('div');
+  box.style.cssText = 'background:#2a2a3e;border:3px solid #dc2626;border-radius:12px;padding:32px 48px;text-align:center;font-size:1.5rem;font-weight:bold;color:#fff;animation:pulse 0.8s 2;';
+  box.textContent = message;
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+  setTimeout(() => overlay.remove(), 2500);
 }
 
 function updatePhaseLabel(phase) {
@@ -341,9 +450,20 @@ function renderMyHand() {
     el.textContent = '手札: なし';
     return;
   }
-  el.innerHTML = '手札: ' + state.myHand.map(c =>
-    `<strong>${CARD_NAMES[c.cardType] || c.cardType}</strong>`
-  ).join(', ');
+  el.innerHTML = '手札: ';
+  state.myHand.forEach(c => {
+    const span = document.createElement('span');
+    span.innerHTML = `<strong>${CARD_NAMES[c.cardType] || c.cardType}</strong> `;
+    span.style.cursor = 'help';
+    const desc = CARD_DESCRIPTIONS[c.cardType] || '';
+    span.onmouseenter = (e) => showTooltip(e, desc);
+    span.onmouseleave = () => hideTooltip();
+    span.oncontextmenu = (e) => { e.preventDefault(); showTooltip(e, desc); setTimeout(hideTooltip, 3000); };
+    let pressTimer;
+    span.ontouchstart = (e) => { pressTimer = setTimeout(() => showTooltip(e, desc), 500); };
+    span.ontouchend = () => { clearTimeout(pressTimer); setTimeout(hideTooltip, 3000); };
+    el.appendChild(span);
+  });
 }
 
 // === Render Discard Pile ===
@@ -370,7 +490,13 @@ function renderTurnActions() {
   }
 
   const phase = gs.phase;
-  const canDraw = phase === 'STORY' && gs.deckRemainingCount > 0;
+  const canDraw = (phase === 'STORY' || phase === 'LAST_TURN') && gs.deckRemainingCount > 1;
+
+  // 最後の手番フェイズで山札が引けない場合、手札1枚をそのまま使用/捨てる選択肢を表示
+  if (phase === 'LAST_TURN' && !canDraw && state.myHand.length === 1) {
+    renderCardChoiceUI();
+    return;
+  }
 
   // ① 山札を引く
   const btnDraw = createBtn('① 山札を引く', () => sendEvent('ACTION_DRAW_CARD'));
@@ -395,18 +521,37 @@ function renderTurnActions() {
 
 function renderCardChoiceUI() {
   const container = document.getElementById('game-actions');
-  container.innerHTML = '<div style="width:100%;text-align:center;font-size:0.85rem;margin-bottom:8px;">手札が2枚あります。1枚を使用または廃棄してください:</div>';
+  const msg = state.myHand.length >= 2
+    ? '手札が2枚あります。1枚を使用または廃棄してください:'
+    : '手札のカードを使用または廃棄してください:';
+  container.innerHTML = `<div style="width:100%;text-align:center;font-size:0.85rem;margin-bottom:8px;">${msg}</div>`;
 
   state.myHand.forEach(card => {
     const isCursedRing = card.cardType === 'CURSED_RING';
-    const btnUse = createBtn(`使う: ${CARD_NAMES[card.cardType]}`, () => showCardUseUI(card));
-    btnUse.disabled = isCursedRing;
-    container.appendChild(btnUse);
+    const isPassive = card.cardType === 'GUARD' || card.cardType === 'KNIGHT';
+    const isPoisonCombInStory = card.cardType === 'POISON_COMB' && state.gameState && state.gameState.phase === 'STORY';
+    const cannotUse = isCursedRing || isPassive || isPoisonCombInStory;
 
-    const btnDiscard = createBtn(`捨てる: ${CARD_NAMES[card.cardType]}`, () => sendEvent('ACTION_DISCARD_CARD', { cardId: card.cardId }));
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:8px;width:100%;margin-bottom:8px;align-items:center;';
+
+    const label = document.createElement('span');
+    label.style.cssText = 'flex:1;font-size:0.85rem;font-weight:bold;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+    label.textContent = CARD_NAMES[card.cardType] || card.cardType;
+    row.appendChild(label);
+
+    const btnUse = createBtn('使う', () => showCardUseUI(card));
+    btnUse.disabled = cannotUse;
+    btnUse.style.cssText = 'flex:0 0 auto;';
+    row.appendChild(btnUse);
+
+    const btnDiscard = createBtn('捨てる', () => sendEvent('ACTION_DISCARD_CARD', { cardId: card.cardId }));
     btnDiscard.disabled = isCursedRing;
     btnDiscard.classList.add('btn-secondary');
-    container.appendChild(btnDiscard);
+    btnDiscard.style.cssText = 'flex:0 0 auto;';
+    row.appendChild(btnDiscard);
+
+    container.appendChild(row);
   });
 }
 
@@ -421,14 +566,32 @@ function showCardUseUI(card) {
   switch (card.cardType) {
     case 'APPLE_QUESTION':
     case 'MUSHROOM_QUESTION':
+      // 既に同じ質問に答えたプレイヤーは対象外
+      const qTargets = gs.players.filter(p => {
+        if (!p.isAlive) return false;
+        if (card.cardType === 'APPLE_QUESTION' && p.applePreferenceAnswer !== null && p.applePreferenceAnswer !== undefined) return false;
+        if (card.cardType === 'MUSHROOM_QUESTION' && p.mushroomPreferenceAnswer !== null && p.mushroomPreferenceAnswer !== undefined) return false;
+        return true;
+      });
+      qTargets.forEach(p => {
+        container.appendChild(createBtn(p.userName, () =>
+          sendEvent('ACTION_USE_CARD', { cardId: card.cardId, cardType: card.cardType, params: { targetPlayerId: p.playerId } })
+        ));
+      });
+      break;
+
     case 'KNIFE':
-    case 'ROPE':
     case 'POISON_COMB':
-      // Target 1 player (including self for questions)
-      const targets = card.cardType === 'APPLE_QUESTION' || card.cardType === 'MUSHROOM_QUESTION'
-        ? gs.players.filter(p => p.isAlive)
-        : alivePlayers;
-      targets.forEach(p => {
+      alivePlayers.forEach(p => {
+        container.appendChild(createBtn(p.userName, () =>
+          sendEvent('ACTION_USE_CARD', { cardId: card.cardId, cardType: card.cardType, params: { targetPlayerId: p.playerId } })
+        ));
+      });
+      break;
+
+    case 'ROPE':
+      // ロープは自分含む全生存プレイヤーが対象
+      gs.players.filter(p => p.isAlive).forEach(p => {
         container.appendChild(createBtn(p.userName, () =>
           sendEvent('ACTION_USE_CARD', { cardId: card.cardId, cardType: card.cardType, params: { targetPlayerId: p.playerId } })
         ));
@@ -661,6 +824,7 @@ document.getElementById('input-username').addEventListener('input', (e) => {
   const valid = e.target.value.trim().length > 0;
   document.getElementById('btn-create-room').disabled = !valid;
   document.getElementById('btn-join-room').disabled = !valid;
+  document.getElementById('btn-rejoin-room').disabled = !valid;
 });
 
 // === Event listeners ===
@@ -672,6 +836,11 @@ document.getElementById('btn-create-room').onclick = () => {
 document.getElementById('btn-join-room').onclick = () => {
   state.username = document.getElementById('input-username').value.trim();
   showScreen('join');
+};
+
+document.getElementById('btn-rejoin-room').onclick = () => {
+  state.username = document.getElementById('input-username').value.trim();
+  showScreen('rejoin');
 };
 
 document.getElementById('btn-reset-cards').onclick = () => {
@@ -714,7 +883,7 @@ document.getElementById('btn-do-create').onclick = async () => {
 };
 
 document.getElementById('btn-do-join').onclick = async () => {
-  const code = document.getElementById('input-room-code').value.trim().toUpperCase();
+  const code = document.getElementById('input-room-code').value.trim();
   if (!code) return alert('コードを入力してください');
   try {
     const data = await api('POST', '/' + code + '/join', { userName: state.username });
@@ -729,6 +898,34 @@ document.getElementById('btn-do-join').onclick = async () => {
     connectWs();
     pollRoom();
     state.pollInterval = setInterval(pollRoom, 3000);
+  } catch(e) { alert(e.message); }
+};
+
+document.getElementById('btn-do-rejoin').onclick = async () => {
+  const code = document.getElementById('input-rejoin-code').value.trim();
+  if (!code) return alert('ルームコードを入力してください');
+  try {
+    const data = await api('POST', '/' + code + '/rejoin', { userName: state.username });
+    state.roomId = data.roomId;
+    state.roomCode = data.roomCode || code;
+    state.playerId = data.playerId;
+    state.isHost = false;
+
+    if (data.status === 'IN_GAME') {
+      // ゲーム中に復帰 → WebSocket接続してゲーム画面へ
+      showScreen('game');
+      document.getElementById('room-code-label').textContent = `🏠 ${state.roomCode}`;
+      connectWs();
+    } else {
+      // 待機中に復帰
+      document.getElementById('display-room-code').textContent = state.roomCode;
+      document.getElementById('btn-start-game').style.display = 'none';
+      document.getElementById('waiting-msg').style.display = 'block';
+      showScreen('waiting');
+      connectWs();
+      pollRoom();
+      state.pollInterval = setInterval(pollRoom, 3000);
+    }
   } catch(e) { alert(e.message); }
 };
 
@@ -760,4 +957,55 @@ document.getElementById('btn-show-discard').onclick = () => {
   const el = document.getElementById('discard-pile');
   el.style.display = el.style.display === 'none' ? 'block' : 'none';
 };
+
+document.getElementById('btn-show-reference').onclick = () => {
+  const el = document.getElementById('role-reference');
+  el.style.display = el.style.display === 'none' ? 'block' : 'none';
+};
+
+// === Tooltip for role and cards ===
+const CARD_DESCRIPTIONS = {
+  APPLE_QUESTION: '任意のプレイヤー1名に「リンゴが好きか」を質問する',
+  MUSHROOM_QUESTION: '任意のプレイヤー1名に「きのこが好きか」を質問する',
+  ITADAKIMASU: '山札の上から1〜3枚を捨て山に捨てる',
+  ROULETTE_1: '全員のリンゴを時計/反時計回りに1個ずらす',
+  ROULETTE_2: '全員のリンゴを時計/反時計回りに2個ずらす',
+  ROULETTE_3: '全員のリンゴを時計/反時計回りに3個ずらす',
+  KNIFE: '任意のプレイヤーのリンゴを全員に公開する',
+  CURSED_RING: '捨てられない。最終フェイズで手番が来たら即死',
+  POISON_COMB: '【最終フェイズ専用】任意のプレイヤーを即死させる',
+  KNIGHT: '【受動】白雪姫が持っていると毒の櫛を無効化',
+  GUARD: '【受動】女王のリンゴ交換を自動拒否',
+  ROPE: '任意のプレイヤーの次の手番をスキップさせる',
+  PRESENT_EXCHANGE: '任意の2名の手札を交換させる'
+};
+
+const ROLE_DESCRIPTIONS = {
+  SNOW_WHITE: '白雪姫陣営。特殊能力なし。生存が陣営の勝利条件。',
+  QUEEN: '女王陣営。エンディングで毒リンゴ所持時に交換可能。',
+  GREEN: '白雪姫陣営。白雪姫が誰かを知っている。',
+  BLACK: '女王陣営。毒リンゴの位置を常に把握している。',
+  BROWN: '白雪姫陣営。特殊能力なし。',
+  GRAY: '白雪姫陣営。能力発動で次の手番まで交換対象にならない（1回）。',
+  NAVY: '女王陣営。質問への回答で嘘がつける。',
+  ROSE: '第三陣営。白雪姫と自分の両方が生存で勝利。',
+  LIGHT: '白雪姫陣営。役職公開して任意2名のリンゴを交換させる（1回）。'
+};
+
+function showTooltip(e, text) {
+  hideTooltip();
+  const tip = document.createElement('div');
+  tip.id = 'tooltip';
+  tip.textContent = text;
+  tip.style.cssText = 'position:fixed;z-index:10000;background:#222;color:#eee;padding:8px 12px;border-radius:6px;font-size:0.8rem;max-width:250px;pointer-events:none;box-shadow:0 2px 8px rgba(0,0,0,0.5);';
+  document.body.appendChild(tip);
+  const rect = e.target.getBoundingClientRect();
+  tip.style.left = Math.min(rect.left, window.innerWidth - 260) + 'px';
+  tip.style.top = (rect.bottom + 6) + 'px';
+}
+
+function hideTooltip() {
+  const existing = document.getElementById('tooltip');
+  if (existing) existing.remove();
+}
 
