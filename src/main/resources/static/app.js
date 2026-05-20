@@ -363,8 +363,6 @@ function handleTurnChanged(payload) {
   // 手札表示を更新（ゲーム開始直後の表示確保）
   renderMyHand();
 
-  const phase = state.gameState?.phase;
-  const isEndingPhase = phase === 'ENDING_QUEEN' || phase === 'ENDING_REVEAL' || phase === 'FINISHED';
   if (!isEndingPhase) {
     if (payload.currentTurnPlayerId === state.playerId) {
       renderTurnActions();
