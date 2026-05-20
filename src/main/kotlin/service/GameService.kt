@@ -915,7 +915,7 @@ class GameService(
     }
 
     private suspend fun startEndingReveal(roomId: UUID) {
-        // ホストが「エンディングリビールに進む」ボタンを押すまで待機（タイムアウトなし）
+        // ホストが「エンディングに進む」ボタンを押すまで待機（タイムアウトなし）
         pendingProceedToReveal[roomId] = true
         broadcast(roomId, EventType.WAITING_HOST_PROCEED, WaitingHostProceedPayload("ENDING_REVEAL"))
     }
@@ -1001,13 +1001,6 @@ class GameService(
             else -> Faction.THIRD_FACTION
         }
 
-        // 勝利演出を送信
-        broadcast(roomId, EventType.VICTORY_ANNOUNCEMENT, VictoryAnnouncementPayload(
-            winFaction = winFaction.name,
-            snowWhiteAlive = snowWhite?.isAlive ?: false,
-            roseAlive = rose?.isAlive
-        ))
-        delay(5000) // 5秒間の演出表示
 
         val resultState = GameStateManager.update(roomId) { it.copy(phase = GamePhase.FINISHED) } ?: return
         roomRepository.updateStatus(roomId, RoomStatus.FINISHED)

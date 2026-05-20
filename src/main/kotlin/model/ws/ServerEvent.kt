@@ -104,12 +104,6 @@ data class SnowWhiteKilledPayload(
     val snowWhitePlayerId: String
 )
 
-@Serializable
-data class VictoryAnnouncementPayload(
-    val winFaction: String,
-    val snowWhiteAlive: Boolean,
-    val roseAlive: Boolean? = null
-)
 
 @Serializable
 data class NotifyRoulettePayload(
@@ -222,7 +216,6 @@ object EventType {
     const val NOTIFY_APPLE_PUBLICLY_REVEALED = "NOTIFY_APPLE_PUBLICLY_REVEALED"
     const val ENDING_REVEAL_PLAYER = "ENDING_REVEAL_PLAYER"
     const val SNOW_WHITE_KILLED = "SNOW_WHITE_KILLED"
-    const val VICTORY_ANNOUNCEMENT = "VICTORY_ANNOUNCEMENT"
     const val NOTIFY_ROULETTE = "NOTIFY_ROULETTE"
     const val NOTIFY_PREFERENCE_ANSWERED = "NOTIFY_PREFERENCE_ANSWERED"
     const val NOTIFY_PLAYER_DIED = "NOTIFY_PLAYER_DIED"
