@@ -125,6 +125,7 @@ function handleServerEvent(msg) {
     case 'GAME_STARTED':
       showScreen('game');
       state.thinkTimeUsed = false;
+      updatePhaseLabel('STORY');
       // ルームコードをゲーム画面に表示
       document.getElementById('room-code-label').textContent = `🏠 ${state.roomCode}`;
       // ログをクリア（ゲーム開始時からのみ表示）
@@ -307,7 +308,7 @@ function handleGameStateSync(payload) {
   if (payload.discardPile) renderDiscardPile(payload.discardPile);
   if (payload.phase) updatePhaseLabel(payload.phase);
 
-  // エンディング/結果フェーズ中はアクションUIを上書きしない
+  // エンディング/結果フェーズ中はアクションUIを上書きしない（ただし初回遷移時のみ更新）
   const phase = payload.phase;
   const isEndingPhase = phase === 'ENDING_QUEEN' || phase === 'ENDING_REVEAL' || phase === 'FINISHED';
 
@@ -322,6 +323,12 @@ function handleGameStateSync(payload) {
       const actionsEl = document.getElementById('game-actions');
       const turnPlayerName = getPlayerName(payload.currentTurnPlayerId);
       actionsEl.innerHTML = `<div style="text-align:center;color:#aaa;padding:12px;">🕐 ${turnPlayerName} のターンです。お待ちください…</div>`;
+    }
+  } else if (phase === 'ENDING_QUEEN') {
+    // 女王でないプレイヤーに待機メッセージを表示（女王交換UI表示済みの場合は上書きしない）
+    const actionsEl = document.getElementById('game-actions');
+    if (!actionsEl.innerHTML.includes('女王の特権')) {
+      actionsEl.innerHTML = `<div style="text-align:center;color:#aaa;padding:16px;">👑 女王の特権を実行中です…お待ちください</div>`;
     }
   }
 }
@@ -409,6 +416,7 @@ function renderTimer() {
 
 // === Phase Changed ===
 function handlePhaseChanged(payload) {
+  if (state.gameState) state.gameState.phase = payload.newPhase;
   updatePhaseLabel(payload.newPhase);
   if (payload.newPhase === 'LAST_TURN') {
     log('⚠️ === 最後の手番フェイズに突入しました！ ===');
@@ -867,6 +875,27 @@ function showEndingRevealPlayer(payload) {
     </div>
   `;
   log(`📋 ${payload.userName}: ${roleName}（${factionName}）- ${payload.isPoisoned ? '毒リンゴ' : '安全'} → ${payload.isAlive ? '生存' : '死亡'}`);
+}
+
+// === ホスト操作待ち ===
+function showWaitingHostProceed(targetPhase) {
+  const container = document.getElementById('game-actions');
+  const label = targetPhase === 'ENDING_REVEAL' ? 'エンディングリビールに進む' : '結果画面に進む';
+  const eventType = targetPhase === 'ENDING_REVEAL' ? 'PROCEED_TO_REVEAL' : 'PROCEED_TO_RESULT';
+
+  if (state.isHost) {
+    container.innerHTML = `<div style="width:100%;text-align:center;padding:16px;">
+      <div style="margin-bottom:12px;font-weight:bold;">準備ができたら進めてください</div>
+      <button id="host-proceed-btn" style="padding:12px 24px;font-size:1.1rem;background:#10b981;color:#fff;border:none;border-radius:8px;cursor:pointer;">${label}</button>
+    </div>`;
+    document.getElementById('host-proceed-btn').onclick = () => {
+      sendEvent(eventType, {});
+      container.innerHTML = '<div style="text-align:center;padding:16px;">進行中...</div>';
+    };
+  } else {
+    container.innerHTML = `<div style="width:100%;text-align:center;padding:16px;color:#aaa;">ホストの操作を待っています…</div>`;
+  }
+  log(`⏳ ${label}（ホスト操作待ち）`);
 }
 
 // === 白雪姫死亡の特殊演出 ===
