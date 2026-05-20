@@ -235,7 +235,7 @@ function handleServerEvent(msg) {
       }
       break;
     case 'WAITING_HOST_PROCEED':
-      showWaitingHostProceed(payload.targetPhase);
+      showWaitingHostProceed(payload.nextPhase);
       break;
     case 'NOTIFY_THINK_TIME':
       log(`🤔 ${getPlayerName(payload.playerId)} が長考を使用しました（+2分）`);
@@ -308,6 +308,16 @@ function handleGameStateSync(payload) {
   if (payload.discardPile) renderDiscardPile(payload.discardPile);
   if (payload.phase) updatePhaseLabel(payload.phase);
 
+  // サーバーからのタイマー同期
+  if (payload.turnTimeRemaining !== undefined && payload.turnTimeRemaining !== null) {
+    const diff = Math.abs(state.turnTimeRemaining - payload.turnTimeRemaining);
+    if (diff >= 2) {
+      // 2秒以上ずれていたら補正
+      state.turnTimeRemaining = payload.turnTimeRemaining;
+      renderTimer();
+    }
+  }
+
   // エンディング/結果フェーズ中はアクションUIを上書きしない（ただし初回遷移時のみ更新）
   const phase = payload.phase;
   const isEndingPhase = phase === 'ENDING_QUEEN' || phase === 'ENDING_REVEAL' || phase === 'FINISHED';
@@ -325,9 +335,9 @@ function handleGameStateSync(payload) {
       actionsEl.innerHTML = `<div style="text-align:center;color:#aaa;padding:12px;">🕐 ${turnPlayerName} のターンです。お待ちください…</div>`;
     }
   } else if (phase === 'ENDING_QUEEN') {
-    // 女王でないプレイヤーに待機メッセージを表示（女王交換UI表示済みの場合は上書きしない）
+    // 女王でないプレイヤーに待機メッセージを表示（女王交換UIまたはホスト進行ボタン表示済みの場合は上書きしない）
     const actionsEl = document.getElementById('game-actions');
-    if (!actionsEl.innerHTML.includes('女王の特権')) {
+    if (!actionsEl.innerHTML.includes('女王の特権') && !actionsEl.innerHTML.includes('host-proceed-btn') && !actionsEl.innerHTML.includes('ホストの操作を待っています')) {
       actionsEl.innerHTML = `<div style="text-align:center;color:#aaa;padding:16px;">👑 女王の特権を実行中です…お待ちください</div>`;
     }
   }
@@ -343,8 +353,12 @@ function handleTurnChanged(payload) {
   document.getElementById('turn-label').textContent =
     payload.currentTurnPlayerId === state.playerId ? '🎯 あなたのターン' : `${name} のターン`;
 
-  // タイマー開始
-  startTurnTimer(payload.timeoutSeconds || 180);
+  // タイマー開始（エンディングフェーズ中は固定表示）
+  const phase = state.gameState?.phase;
+  const isEndingPhase = phase === 'ENDING_QUEEN' || phase === 'ENDING_REVEAL' || phase === 'FINISHED';
+  if (!isEndingPhase) {
+    startTurnTimer(payload.timeoutSeconds || 180);
+  }
 
   // 手札表示を更新（ゲーム開始直後の表示確保）
   renderMyHand();
@@ -427,6 +441,13 @@ function handlePhaseChanged(payload) {
   } else if (payload.newPhase === 'ENDING_QUEEN' || payload.newPhase === 'ENDING_REVEAL') {
     log(`--- ${payload.newPhase === 'ENDING_QUEEN' ? 'エンディング: 女王の特権' : 'エンディング: リンゴ公開'} ---`);
     showPhaseOverlay(payload.newPhase === 'ENDING_QUEEN' ? '👑 エンディング: 女王の特権' : '🍎 エンディング: リンゴ公開');
+    // エンディングフェーズではタイマーを停止し3:00固定表示
+    stopTurnTimer();
+    state.turnTimeRemaining = 180;
+    const el = document.getElementById('timer-label');
+    el.textContent = '⏱ 3:00';
+    el.style.color = '';
+    el.style.fontWeight = '';
   }
 }
 

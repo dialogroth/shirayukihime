@@ -17,7 +17,9 @@ data class GameState(
     val discardOrder: List<UUID>,
     val queenSpecialDone: Boolean = false,
     val lastTurnPlayersPlayed: Set<UUID> = emptySet(),
-    val lastTurnTriggerPlayerDone: Boolean = false
+    val lastTurnTriggerPlayerDone: Boolean = false,
+    val turnStartTimeMillis: Long = System.currentTimeMillis(),
+    val turnTimeoutSeconds: Int = 180
 ) {
     fun currentTurnPlayerId(): UUID = turnOrder[currentTurnIndex]
 

@@ -45,7 +45,8 @@ data class GameStateSyncPayload(
     val discardPile: List<CardInfo>,
     val players: List<PlayerSummary>,
     val apples: List<AppleSummary>,
-    val myHand: List<CardInfo>
+    val myHand: List<CardInfo>,
+    val turnTimeRemaining: Int? = null
 )
 
 @Serializable

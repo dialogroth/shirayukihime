@@ -303,6 +303,7 @@ class GameService(
 
     private fun startTurnTimer(roomId: UUID, playerId: UUID) {
         cancelTurnTimer(roomId)
+        GameStateManager.update(roomId) { it.copy(turnStartTimeMillis = System.currentTimeMillis(), turnTimeoutSeconds = 180) }
         turnTimerJobs[roomId] = scope.launch {
             delay(180_000)
             handleTurnTimeout(roomId, playerId)
@@ -326,6 +327,7 @@ class GameService(
 
         // ターンタイマーをキャンセルして+2分で再スタート
         cancelTurnTimer(roomId)
+        GameStateManager.update(roomId) { it.copy(turnStartTimeMillis = System.currentTimeMillis(), turnTimeoutSeconds = 120) }
         turnTimerJobs[roomId] = scope.launch {
             delay(120_000)
             handleTurnTimeout(roomId, playerId)
@@ -859,26 +861,10 @@ class GameService(
         broadcastTurnChanged(roomId, queenPlayer.playerId)
         sendTo(roomId, queenPlayer.playerId, EventType.REQUEST_QUEEN_EXCHANGE,
             RequestQueenExchangePayload(targets))
-
-        queenExchangeTimerJobs[roomId] = scope.launch {
-            delay(180_000)
-            handleQueenExchangeTimeout(roomId, queenPlayer.playerId)
-        }
     }
 
-    /** 女王の特権完了後：全員のリンゴを公開（死亡判定なし）してからエンディングリビールへ */
+    /** 女王の特権完了後：ホストボタン待ちへ（リンゴ公開はボタン押下後に実行） */
     private suspend fun revealAllApplesAndProceed(roomId: UUID) {
-        val preState = GameStateManager.get(roomId) ?: return
-        GameStateManager.update(roomId) { s ->
-            val revealedApples = s.apples.map { it.copy(isPubliclyRevealed = true) }
-            s.copy(apples = revealedApples)
-        }
-        // 全員にリンゴ公開を通知
-        preState.apples.forEach { apple ->
-            broadcast(roomId, EventType.NOTIFY_APPLE_PUBLICLY_REVEALED, NotifyApplePubliclyRevealedPayload(
-                apple.appleId.toString(), apple.currentHolderPlayerId.toString(), apple.isPoisoned
-            ))
-        }
         val syncState = GameStateManager.get(roomId) ?: return
         broadcastGameStateSync(roomId, syncState)
 
@@ -929,25 +915,14 @@ class GameService(
     }
 
     private suspend fun startEndingReveal(roomId: UUID) {
-        // ホストが「エンディングリビールに進む」ボタンを押すまで待機（1分タイムアウト）
+        // ホストが「エンディングリビールに進む」ボタンを押すまで待機（タイムアウトなし）
         pendingProceedToReveal[roomId] = true
         broadcast(roomId, EventType.WAITING_HOST_PROCEED, WaitingHostProceedPayload("ENDING_REVEAL"))
-        proceedToRevealTimerJobs[roomId] = scope.launch {
-            delay(60_000)
-            if (pendingProceedToReveal[roomId] == true) {
-                pendingProceedToReveal.remove(roomId)
-                broadcast(roomId, EventType.NOTIFY_TIMEOUT, NotifyTimeoutPayload(
-                    timeoutType = "HOST_PROCEED", playerId = "", autoAction = "ホストの操作が行われませんでした"
-                ))
-                executeEndingReveal(roomId)
-            }
-        }
     }
 
     suspend fun handleProceedToReveal(roomId: UUID, hostPlayerId: UUID) {
         if (pendingProceedToReveal[roomId] != true) return
         pendingProceedToReveal.remove(roomId)
-        proceedToRevealTimerJobs.remove(roomId)?.cancel()
         executeEndingReveal(roomId)
     }
 
@@ -955,14 +930,28 @@ class GameService(
         val newState = GameStateManager.update(roomId) { it.copy(phase = GamePhase.ENDING_REVEAL) } ?: return
         broadcast(roomId, EventType.PHASE_CHANGED, PhaseChangedPayload("ENDING_REVEAL", null))
 
+        // 全員のリンゴを公開（死亡判定なし）
+        val preState = GameStateManager.get(roomId) ?: return
+        GameStateManager.update(roomId) { s ->
+            val revealedApples = s.apples.map { it.copy(isPubliclyRevealed = true) }
+            s.copy(apples = revealedApples)
+        }
+        preState.apples.forEach { apple ->
+            broadcast(roomId, EventType.NOTIFY_APPLE_PUBLICLY_REVEALED, NotifyApplePubliclyRevealedPayload(
+                apple.appleId.toString(), apple.currentHolderPlayerId.toString(), apple.isPoisoned
+            ))
+        }
+        val revealedState = GameStateManager.get(roomId) ?: return
+        broadcastGameStateSync(roomId, revealedState)
+
         // 一人ずつ役職公開 → リンゴ判定 → 死亡通知 を順番に行う
-        val players = newState.players.values.sortedBy { newState.turnOrder.indexOf(it.playerId) }
+        val players = revealedState.players.values.sortedBy { revealedState.turnOrder.indexOf(it.playerId) }
         val totalPlayers = players.size
 
         players.forEachIndexed { index, player ->
             delay(4000) // 4秒間隔で一人ずつ公開
 
-            val apple = newState.appleOf(player.playerId)
+            val apple = revealedState.appleOf(player.playerId)
             val isPoisoned = apple?.isPoisoned ?: false
             val willDie = isPoisoned && player.isAlive
 
@@ -978,51 +967,26 @@ class GameService(
                 totalPlayers = totalPlayers
             ))
 
-            // 毒リンゴ保持者を死亡処理（白雪姫以外）
-            if (willDie && player.role != Role.SNOW_WHITE) {
+            // 毒リンゴ保持者を死亡処理
+            if (willDie) {
                 GameStateManager.update(roomId) { s ->
                     s.copy(players = s.players + (player.playerId to player.copy(isAlive = false)))
                 }
                 broadcast(roomId, EventType.NOTIFY_PLAYER_DIED, NotifyPlayerDiedPayload(player.playerId.toString(), "POISON_APPLE"))
-            } else if (willDie && player.role == Role.SNOW_WHITE) {
-                // 白雪姫が毒リンゴで死亡 → 特殊演出後にゲーム終了
-                GameStateManager.update(roomId) { s ->
-                    s.copy(players = s.players + (player.playerId to player.copy(isAlive = false)))
-                }
-                broadcast(roomId, EventType.NOTIFY_PLAYER_DIED, NotifyPlayerDiedPayload(player.playerId.toString(), "POISON_APPLE"))
-                broadcast(roomId, EventType.SNOW_WHITE_KILLED, SnowWhiteKilledPayload(
-                    cause = "POISON_APPLE",
-                    snowWhitePlayerId = player.playerId.toString()
-                ))
-                delay(5000)
-                endGameQueenWins(roomId, "SNOW_WHITE_KILLED")
-                return
             }
         }
 
         delay(5000) // 全員公開後に勝利演出前の間を取る
         val endState = GameStateManager.get(roomId) ?: return
         broadcastGameStateSync(roomId, endState)
-        // ホストが「結果画面に進む」ボタンを押すまで待機（1分タイムアウト）
+        // ホストが「結果画面に進む」ボタンを押すまで待機（タイムアウトなし）
         pendingProceedToResult[roomId] = true
         broadcast(roomId, EventType.WAITING_HOST_PROCEED, WaitingHostProceedPayload("RESULT"))
-        proceedToResultTimerJobs[roomId] = scope.launch {
-            delay(60_000)
-            if (pendingProceedToResult[roomId] == true) {
-                pendingProceedToResult.remove(roomId)
-                broadcast(roomId, EventType.NOTIFY_TIMEOUT, NotifyTimeoutPayload(
-                    timeoutType = "HOST_PROCEED", playerId = "", autoAction = "ホストの操作が行われませんでした"
-                ))
-                val s = GameStateManager.get(roomId) ?: return@launch
-                determineWinner(roomId, s)
-            }
-        }
     }
 
     suspend fun handleProceedToResult(roomId: UUID, hostPlayerId: UUID) {
         if (pendingProceedToResult[roomId] != true) return
         pendingProceedToResult.remove(roomId)
-        proceedToResultTimerJobs.remove(roomId)?.cancel()
         val endState = GameStateManager.get(roomId) ?: return
         determineWinner(roomId, endState)
     }
@@ -1287,6 +1251,10 @@ class GameService(
         val discardPile = state.discardOrder.mapNotNull { id ->
             state.cards[id]?.let { CardInfo(it.cardId.toString(), it.cardType.name) }
         }
+        val turnTimeRemaining = if (state.phase in listOf(GamePhase.STORY, GamePhase.LAST_TURN)) {
+            val elapsed = (System.currentTimeMillis() - state.turnStartTimeMillis) / 1000
+            maxOf(0, state.turnTimeoutSeconds - elapsed.toInt())
+        } else null
         val payload = GameStateSyncPayload(
             phase = state.phase.name,
             currentTurnPlayerId = if (state.phase in listOf(GamePhase.STORY, GamePhase.LAST_TURN))
@@ -1295,7 +1263,8 @@ class GameService(
             discardPile = discardPile,
             players = state.players.values.map { it.toSummary(visibleTo = playerId) },
             apples = apples,
-            myHand = myHand
+            myHand = myHand,
+            turnTimeRemaining = turnTimeRemaining
         )
         sendTo(roomId, playerId, EventType.GAME_STATE_SYNC, payload)
     }
@@ -1307,7 +1276,12 @@ class GameService(
     }
 
     private suspend fun broadcastTurnChanged(roomId: UUID, playerId: UUID) {
-        broadcast(roomId, EventType.TURN_CHANGED, TurnChangedPayload(playerId.toString(), 180))
+        val state = GameStateManager.get(roomId)
+        val remaining = if (state != null) {
+            val elapsed = (System.currentTimeMillis() - state.turnStartTimeMillis) / 1000
+            maxOf(0, state.turnTimeoutSeconds - elapsed.toInt())
+        } else 180
+        broadcast(roomId, EventType.TURN_CHANGED, TurnChangedPayload(playerId.toString(), remaining))
     }
 
     // ── 送信ヘルパー ─────────────────────────────────────────────────
