@@ -1,8 +1,8 @@
 # WebSocketイベント設計書：白雪姫のアップルルーレット
 
-**バージョン：** 3.0  
+**バージョン：** 3.1  
 **作成日：** 2026年5月10日  
-**最終更新：** 2026年5月19日
+**最終更新：** 2026年5月21日
 
 ---
 
@@ -398,6 +398,34 @@ ws://<host>/ws/game?roomId=<roomId>&playerId=<playerId>
 
 ---
 
+### 4-6. エンディング進行（ホスト専用）
+
+#### PROCEED_TO_REVEAL（エンディングリビール演出へ進む）
+
+- **送信者：** ホストのみ
+- **タイミング：** `WAITING_HOST_PROCEED { nextPhase: "ENDING_REVEAL" }` を受信した後、ホストの「エンディングに進む」ボタン押下時
+- **ペイロード：** なし
+
+```json
+{ "type": "PROCEED_TO_REVEAL", "payload": {} }
+```
+
+> ホスト以外のプレイヤーが送信した場合、または待機中でない場合は無視される（エラーなし）。タイムアウトは設けず、ホストが押すまでサーバーは待ち続ける。
+
+#### PROCEED_TO_RESULT（結果画面へ進む）
+
+- **送信者：** ホストのみ
+- **タイミング：** `WAITING_HOST_PROCEED { nextPhase: "RESULT" }` を受信した後、ホストの「結果画面に進む」ボタン押下時
+- **ペイロード：** なし
+
+```json
+{ "type": "PROCEED_TO_RESULT", "payload": {} }
+```
+
+> ホスト以外のプレイヤーが送信した場合、または待機中でない場合は無視される（エラーなし）。タイムアウトは設けず、ホストが押すまでサーバーは待ち続ける。
+
+---
+
 ## 5. サーバー→クライアント イベント
 
 ### 5-1. 接続・ルーム
@@ -556,10 +584,13 @@ ws://<host>/ws/game?roomId=<roomId>&playerId=<playerId>
     "apples": [ "AppleSummary, ..." ],
     "myHand": [
       { "cardId": "UUID", "cardType": "KNIFE" }
-    ]
+    ],
+    "turnTimeRemaining": 152
   }
 }
 ```
+
+> **`turnTimeRemaining`（int? 秒）：** 現在の手番プレイヤーの残り時間。サーバーが `GameState.turnStartTimeMillis` と `turnTimeoutSeconds` から `max(0, turnTimeoutSeconds - (now - turnStartTimeMillis)/1000)` で算出する。`STORY` / `LAST_TURN` フェイズのみ含まれ、`ENDING_QUEEN` / `ENDING_REVEAL` / `FINISHED` では `null`。クライアントは受信時に自身のカウントダウンとの差が一定以上（例：2秒以上）あれば補正する。
 
 #### YOUR_APPLE_STATUS（自分のリンゴの確認結果）
 
@@ -834,6 +865,63 @@ ws://<host>/ws/game?roomId=<roomId>&playerId=<playerId>
 
 > クライアントは現在のタイマーに `newTimeoutSeconds` を加算する。
 
+#### WAITING_HOST_PROCEED（ホストの進行ボタン待機）
+
+- **送信先：** 全員
+- **タイミング：** 女王特権処理完了後（`nextPhase: "ENDING_REVEAL"`）、エンディングリビール演出完了後（`nextPhase: "RESULT"`）
+
+```json
+{
+  "type": "WAITING_HOST_PROCEED",
+  "payload": {
+    "nextPhase": "ENDING_REVEAL"
+  }
+}
+```
+
+> **クライアント挙動：** ホストは「エンディングに進む」または「結果画面に進む」ボタンを表示する。非ホストは「ホストの操作を待っています…」を表示する。タイムアウトなし。`nextPhase` は `"ENDING_REVEAL"` または `"RESULT"`。
+
+#### ENDING_REVEAL_PLAYER（エンディング1人ずつ役職公開）
+
+- **送信先：** 全員
+- **タイミング：** `ENDING_REVEAL` フェイズで4秒間隔に1人ずつ送信
+
+```json
+{
+  "type": "ENDING_REVEAL_PLAYER",
+  "payload": {
+    "playerId": "UUID",
+    "userName": "プレイヤー名",
+    "role": "QUEEN",
+    "faction": "QUEEN_FACTION",
+    "isPoisoned": true,
+    "isAlive": false,
+    "revealIndex": 0,
+    "totalPlayers": 5
+  }
+}
+```
+
+> `isAlive` は本イベント時点での生死（毒リンゴで本演出により死亡するプレイヤーは `false`）。
+
+#### SNOW_WHITE_KILLED（白雪姫死亡の専用演出）
+
+- **送信先：** 全員
+- **タイミング：** 白雪姫が毒の櫛・呪いの指輪・接続切断によって死亡した直後（エンディングフェイズ中の毒リンゴ死亡では送信されない）
+
+```json
+{
+  "type": "SNOW_WHITE_KILLED",
+  "payload": {
+    "cause": "POISON_COMB",
+    "killerPlayerId": "UUID",
+    "snowWhitePlayerId": "UUID"
+  }
+}
+```
+
+> `cause` は `"POISON_COMB"` / `"CURSED_RING"` / `"DISCONNECTED"` のいずれか。本イベント送信から約3秒後にサーバーが `GAME_RESULT { reason: "SNOW_WHITE_KILLED" or "SNOW_WHITE_DISCONNECTED" }` を送信して女王陣営勝利として強制終了する。クライアントはこの3秒間に専用演出を表示する。エンディングフェイズ（毒リンゴ）には本イベントは使われず、通常の `ENDING_REVEAL_PLAYER` + `NOTIFY_PLAYER_DIED` で処理される。
+
 ---
 
 ### 5-5. 入力要求
@@ -1071,6 +1159,14 @@ Server → 全員 : GAME_STATE_SYNC
 Server → 全員 : TURN_CHANGED { nextTurnPlayerId }
 ```
 
+> **死亡したプレイヤーが白雪姫だった場合：** `NOTIFY_PLAYER_DIED` の直後に追加で以下が送信されゲームは強制終了する。
+>
+> ```
+> Server → 全員 : SNOW_WHITE_KILLED { cause: "CURSED_RING", snowWhitePlayerId }
+>   ※ 約3秒間の専用演出を表示
+> Server → 全員 : GAME_RESULT { winFaction: "QUEEN_FACTION", reason: "SNOW_WHITE_KILLED", players }
+> ```
+
 ---
 
 ### 6-6. 毒の櫛 + 騎士（無効化）のフロー
@@ -1110,11 +1206,14 @@ Server → 全員 : GAME_STATE_SYNC
 ```
 【パターンA：女王が死亡済みの場合】
 ※ 毒の櫛・呪いの指輪によって最後の手番フェイズ中に死亡していた場合
-※ 共通ステップ（リンゴ公開・REQUEST）はすべてスキップする
+※ 女王のリンゴ公開・REQUEST_QUEEN_EXCHANGE はすべてスキップする
 
 Server → 全員 : PHASE_CHANGED { newPhase: "ENDING_QUEEN", triggerPlayerId: null }
-  ※女王死亡済みのためサーバーが即座に自動スキップ
-Server → 全員 : PHASE_CHANGED { newPhase: "ENDING_REVEAL", triggerPlayerId: null }
+Server → 全員 : GAME_STATE_SYNC
+Server → 全員 : WAITING_HOST_PROCEED { nextPhase: "ENDING_REVEAL" }
+  ※ ホスト「エンディングに進む」押下を待機
+Client(ホスト) → Server : PROCEED_TO_REVEAL
+  ※ 以降の「ENDING_REVEAL 以降の共通フロー」へ続く
 ```
 
 ```
@@ -1123,14 +1222,17 @@ Server → 全員 : PHASE_CHANGED { newPhase: "ENDING_REVEAL", triggerPlayerId: 
 Server → 全員 : PHASE_CHANGED { newPhase: "ENDING_QUEEN", triggerPlayerId: null }
 Server → 全員 : NOTIFY_APPLE_PUBLICLY_REVEALED { appleId, holderPlayerId: 女王ID, isPoisoned: false }
 Server → 全員 : GAME_STATE_SYNC
-  ※通常リンゴのため交換なし、即座に次フェイズへ
-Server → 全員 : PHASE_CHANGED { newPhase: "ENDING_REVEAL", triggerPlayerId: null }
+  ※ 通常リンゴのため交換なし
+Server → 全員 : GAME_STATE_SYNC
+Server → 全員 : WAITING_HOST_PROCEED { nextPhase: "ENDING_REVEAL" }
+Client(ホスト) → Server : PROCEED_TO_REVEAL
 ```
 
 ```
 【パターンC：女王のリンゴが毒リンゴ・交換成立の場合】
 
 （共通ステップ実行後）
+Server → 全員 : TURN_CHANGED { currentTurnPlayerId: 女王 }
 Server → 女王 : REQUEST_QUEEN_EXCHANGE { availableTargetPlayerIds }
 
 Client(女王) → Server : RESPONSE_QUEEN_EXCHANGE { targetPlayerId }
@@ -1138,7 +1240,8 @@ Client(女王) → Server : RESPONSE_QUEEN_EXCHANGE { targetPlayerId }
   ※対象がガードを持っていない場合
 Server → 全員 : NOTIFY_EXCHANGE_APPLE { playerIdA: 女王, playerIdB: 対象 }
 Server → 全員 : GAME_STATE_SYNC
-Server → 全員 : PHASE_CHANGED { newPhase: "ENDING_REVEAL", triggerPlayerId: null }
+Server → 全員 : WAITING_HOST_PROCEED { nextPhase: "ENDING_REVEAL" }
+Client(ホスト) → Server : PROCEED_TO_REVEAL
 ```
 
 ```
@@ -1149,7 +1252,8 @@ Server → 全員 : PHASE_CHANGED { newPhase: "ENDING_REVEAL", triggerPlayerId: 
 
 Server → 全員 : NOTIFY_GUARD_ACTIVATED { playerId: 対象 }
 Server → 全員 : GAME_STATE_SYNC  ※交換なし
-Server → 全員 : PHASE_CHANGED { newPhase: "ENDING_REVEAL", triggerPlayerId: null }
+Server → 全員 : WAITING_HOST_PROCEED { nextPhase: "ENDING_REVEAL" }
+Client(ホスト) → Server : PROCEED_TO_REVEAL
 ```
 
 ```
@@ -1159,17 +1263,34 @@ Server → 全員 : PHASE_CHANGED { newPhase: "ENDING_REVEAL", triggerPlayerId: 
 Server → 全員 : NOTIFY_TIMEOUT { timeoutType: "QUEEN_EXCHANGE", playerId: 女王, autoAction: "RANDOM_SELECTED" }
 Server → 全員 : NOTIFY_EXCHANGE_APPLE { playerIdA: 女王, playerIdB: ランダム選択されたプレイヤー }
 Server → 全員 : GAME_STATE_SYNC
+Server → 全員 : WAITING_HOST_PROCEED { nextPhase: "ENDING_REVEAL" }
+Client(ホスト) → Server : PROCEED_TO_REVEAL
+```
+
+```
+【全パターン共通：ENDING_REVEAL 以降】
+
 Server → 全員 : PHASE_CHANGED { newPhase: "ENDING_REVEAL", triggerPlayerId: null }
-```
 
-```
-【全パターン共通：ENDING_REVEAL以降】
-
-Server → 全員 : NOTIFY_APPLE_PUBLICLY_REVEALED  ※未公開の全リンゴ分を順次送信
-Server → 全員 : NOTIFY_PLAYER_DIED              ※毒リンゴ保持者分（死亡順に送信）
+  ※ 未公開の全リンゴを順次公開（女王のリンゴ等の既公開分は再送される場合もある）
+Server → 全員 : NOTIFY_APPLE_PUBLICLY_REVEALED  ※ 各リンゴ分
 Server → 全員 : GAME_STATE_SYNC
-Server → 全員 : GAME_RESULT
+
+  ※ ターン順に1人ずつ4秒間隔で
+loop プレイヤー全員（ターン順）:
+  Server → 全員 : ENDING_REVEAL_PLAYER { playerId, role, faction, isPoisoned, isAlive, revealIndex, totalPlayers }
+  if 毒リンゴ保持者 かつ それまで生存:
+    Server → 全員 : NOTIFY_PLAYER_DIED { playerId, cause: "POISON_APPLE" }
+
+Server → 全員 : GAME_STATE_SYNC
+Server → 全員 : WAITING_HOST_PROCEED { nextPhase: "RESULT" }
+  ※ ホスト「結果画面に進む」押下を待機（タイムアウトなし）
+
+Client(ホスト) → Server : PROCEED_TO_RESULT
+Server → 全員 : GAME_RESULT { winFaction, reason: "NORMAL", players }
 ```
+
+> **注意：** `ENDING_REVEAL` フェイズ中に白雪姫が毒リンゴで死亡しても、ゲームは中断せず最後まで全員分の `ENDING_REVEAL_PLAYER` を送信する。専用演出（`SNOW_WHITE_KILLED`）は送信されない。
 
 ---
 

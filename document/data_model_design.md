@@ -1,8 +1,8 @@
 # データモデル設計書：白雪姫のアップルルーレット
 
-**バージョン：** 2.4  
+**バージョン：** 2.5  
 **作成日：** 2026年5月10日  
-**最終更新：** 2026年5月19日
+**最終更新：** 2026年5月21日
 
 ---
 
@@ -230,9 +230,27 @@ data class GameState(
     val cards: Map<UUID, GameCard>,         // cardId → GameCard（全カードの単一ソース）
     val deckOrder: List<UUID>,              // 山札の順番（先頭が次に引くカード）。cardIdのリスト
     val discardOrder: List<UUID>,           // 捨て山の順番（末尾が最新）。cardIdのリスト
-    val queenSpecialDone: Boolean = false   // 女王の特権処理が完了したか
+    val queenSpecialDone: Boolean = false,  // 女王の特権処理が完了したか
+    val lastTurnPlayersPlayed: Set<UUID> = emptySet(),  // 最後の手番フェイズで既にプレイ済プレイヤーIDの集合
+    val lastTurnTriggerPlayerDone: Boolean = false,     // 最後の手番フェイズへの移行起点プレイヤーがプレイ済みか
+    val turnStartTimeMillis: Long = System.currentTimeMillis(),  // 現在の手番開始時刻（タイマー同期用）
+    val turnTimeoutSeconds: Int = 180        // 現在の手番タイムアウト秒（長考使用で +120）
 )
 ```
+
+**最後の手番フェイズの一周判定（`lastTurnPlayersPlayed`）：**
+- `STORY` から `LAST_TURN` への移行時に空集合で初期化
+- 各プレイヤーが手番を完了したタイミング（カード使用・廃棄・能力発動などの行動完了時）でその `playerId` を追加する
+- 全ての生存プレイヤー（`isAlive == true`）の `playerId` が集合に含まれた時点で一周完了と判定し、`ENDING_QUEEN` フェイズへ移行する
+- 死亡したプレイヤーは手番がスキップされるため集合に追加されない（生存者全員の集合と一致するかで判定）
+
+**ホスト進行待機状態（インメモリ）：**
+- サーバーは以下の `Map<RoomId, Boolean>` をインメモリで保持する：
+  - `pendingProceedToReveal`：女王特権完了後、ホストの「エンディングに進む」ボタン押下待ち
+  - `pendingProceedToResult`：エンディングリビール演出完了後、ホストの「結果画面に進む」ボタン押下待ち
+- `WAITING_HOST_PROCEED` 送信時に対応するMapエントリを `true` にセットし、`PROCEED_TO_REVEAL` / `PROCEED_TO_RESULT` 受信時に削除して次フェイズへ進める
+- **タイムアウトは設けない**（ホストが押すまで永続的に待機する）
+- ホスト以外のプレイヤーが `PROCEED_TO_*` を送信しても無視する（エラーも返さない）
 
 **カード管理の方針：**
 - 全カードは `cards: Map<UUID, GameCard>` で一元管理する（単一のソース）
@@ -393,6 +411,7 @@ data class GameCard(
 | 好み回答（`applePreferenceAnswer` / `mushroomPreferenceAnswer`） | 全員（回答のたびにブロードキャスト） |
 | 捨て山の内容 | 全員 |
 | 現在の手番プレイヤー | 全員 |
+| 手番の残り時間（`turnTimeRemaining` 秒） | 全員（`STORY` / `LAST_TURN` フェイズのみ。`ENDING_*` / `FINISHED` では `null`。サーバーが `turnStartTimeMillis` + `turnTimeoutSeconds` から算出して `GAME_STATE_SYNC` に含める） |
 
 > **`isConnected` と `isAlive` の連動ルール：**
 > - WebSocket切断を検知した時点で `isConnected = false` にのみ更新し、1分のタイマーを開始する
@@ -518,19 +537,27 @@ AND
 
 両方満たす場合のみ死亡を無効化する。
 
-### 6-7. ENDING_QUEENフェイズの自動スキップ
+### 6-7. ENDING_QUEENフェイズの自動スキップとホスト進行待機
 
 フェイズが `ENDING_QUEEN` に遷移した時点で、サーバーは女王の生存状態を確認する。
 
 ```
 if (queenPlayer.isAlive == false) {
-    // 女王が死亡済みの場合、特権処理をスキップして即座に次のフェイズへ
+    // 女王が死亡済みの場合、特権処理（リンゴ公開・REQUEST_QUEEN_EXCHANGE）をスキップ
     queenSpecialDone = true
-    phase = ENDING_REVEAL
+    // → ホストの「エンディングに進む」ボタン押下待ちへ
+} else {
+    // 女王のリンゴを公開し、毒なら REQUEST_QUEEN_EXCHANGE、通常ならスキップ
 }
 ```
 
-女王が毒の櫛・呪いの指輪によって最後の手番フェイズ中に死亡していた場合、`ENDING_QUEEN` は発動せず `ENDING_REVEAL`（全員リンゴ公開）に自動遷移する。
+女王特権処理（パターンA〜E すべて）が完了した時点で、サーバーは `pendingProceedToReveal[roomId] = true` にセットして `WAITING_HOST_PROCEED { nextPhase: "ENDING_REVEAL" }` を全員へ送信する。ホストの `PROCEED_TO_REVEAL` 受信時に `ENDING_REVEAL` フェイズへ遷移する。
+
+`ENDING_REVEAL` フェイズでは：
+1. 全プレイヤーのリンゴを `isPubliclyRevealed = true` に更新し、各リンゴについて `NOTIFY_APPLE_PUBLICLY_REVEALED` を送信する（この時点では死亡判定なし）
+2. ターン順に1人ずつ4秒間隔で `ENDING_REVEAL_PLAYER` を送信し、毒リンゴ保持者は `isAlive = false` に更新して `NOTIFY_PLAYER_DIED { cause: "POISON_APPLE" }` を送信する
+3. 全員分の公開完了後、`pendingProceedToResult[roomId] = true` にセットして `WAITING_HOST_PROCEED { nextPhase: "RESULT" }` を送信する
+4. ホストの `PROCEED_TO_RESULT` 受信時に勝敗判定を行い `GAME_RESULT { reason: "NORMAL" }` を送信する
 
 ### 6-8. 包丁使用時のApple更新
 

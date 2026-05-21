@@ -214,8 +214,12 @@ class GameService(
             return
         }
 
-        broadcastTurnChanged(roomId, currentPlayerId)
+        // タイマー（turnStartTimeMillis / turnTimeoutSeconds）を先に更新してから
+        // TURN_CHANGED をブロードキャストする。
+        // 順序が逆だと前ターンの turnStartTimeMillis を読んでしまい
+        // 残り時間が 180 秒未満で配信されるバグになる。
         startTurnTimer(roomId, currentPlayerId)
+        broadcastTurnChanged(roomId, currentPlayerId)
     }
 
     private suspend fun advanceTurn(roomId: UUID) {
