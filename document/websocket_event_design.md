@@ -135,8 +135,8 @@ ws://<host>/ws/game?roomId=<roomId>&playerId=<playerId>
 |-----|------------|------------------|
 | 手番全体 | **3分（180秒）** | 使用中・選択中のカードを捨て山へ送り手番終了。`NOTIFY_DISCARD_CARD` → `GAME_STATE_SYNC` → `TURN_CHANGED` の順に送信する。呪いの指輪を持ちながら山札を引いた後にタイムアウトした場合は新たに引いたカードを捨て山へ送る（呪いの指輪は手元に残る） |
 | 切断プレイヤーの手番 | **1分（60秒）** | 1分以内に再接続した場合はスキップしない。1分経過で死亡扱いとして手番をスキップし次の手番へ進む |
-| `REQUEST_PREFERENCE` への応答 | **1分（60秒）** | タイムアウト時は**役職に応じた正解を自動回答する**（ネイビーはランダムに Yes / No を選択） |
-| `REQUEST_QUEEN_EXCHANGE` への応答 | **3分（180秒）** | タイムアウト時はランダムな生存プレイヤーを交換対象として自動選択する |
+| `REQUEST_PREFERENCE` への応答 | **1分（60秒）** | タイムアウト時は**役職に応じた正解を自動回答する**（ネイビーはランダムに Yes / No を選択）。**対象プレイヤーが切断中の場合は `REQUEST_PREFERENCE` を送信せず、即座に同じ役職ベースの自動回答ロジックで進行する**（1分待たない） |
+| `REQUEST_QUEEN_EXCHANGE` への応答 | **3分（180秒）** | タイムアウト時はランダムな生存プレイヤーを交換対象として自動選択する。**女王が切断中の場合は `REQUEST_QUEEN_EXCHANGE` を送信せず、即座に同じランダム自動選択ロジックで進行する**（3分待たない） |
 
 > **タイムアウトのカウント方法：** 手番開始（`TURN_CHANGED` 送信）と同時にサーバー側でタイマーを開始する。`REQUEST_*` を送信した場合はそのタイマーとは別に入力待ちタイマーを開始する。
 
@@ -705,6 +705,11 @@ ws://<host>/ws/game?roomId=<roomId>&playerId=<playerId>
 
 - **送信先：** 全員
 - **タイミング：** 包丁使用時・エンディングフェイズ
+- **クライアント表示：**
+  - 共通：ログに「XXX のリンゴが公開されました: 🍎毒 / 🍏安全」を表示
+  - `ENDING_QUEEN` フェイズで女王のリンゴが対象の場合は追加で
+    - 毒の場合：「👑 女王のリンゴは🍎毒リンゴでした！女王は交換対象を選択できます」をログ表示＋トースト通知
+    - 安全の場合：「👑 女王のリンゴは🍏安全リンゴでした！リンゴ交換は発生しません」をログ表示＋トースト通知
 
 ```json
 {
@@ -929,6 +934,7 @@ ws://<host>/ws/game?roomId=<roomId>&playerId=<playerId>
 #### REQUEST_PREFERENCE（好み質問への回答要求）
 
 - **送信先：** 対象プレイヤーのみ
+- **対象が切断中の場合：** 本イベントは送信せず、サーバーは即座に役職ベースの自動回答（タイムアウト時と同じロジック / ネイビーはランダム）を行い、`NOTIFY_TIMEOUT { timeoutType: "PREFERENCE", autoAction: "ANSWERED_BY_ROLE" }` → `NOTIFY_PREFERENCE_ANSWERED` → `GAME_STATE_SYNC` → `TURN_CHANGED` の順で進行する
 
 ```json
 {
@@ -944,6 +950,7 @@ ws://<host>/ws/game?roomId=<roomId>&playerId=<playerId>
 
 - **送信先：** 女王のみ
 - **送信条件：** 女王のリンゴが**毒リンゴの場合のみ**送信する。通常リンゴの場合は送信せずそのまま `ENDING_REVEAL` フェイズへ移行する
+- **女王が切断中の場合：** 本イベントは送信せず、サーバーは即座にランダムな生存プレイヤーを交換対象として自動選択し、`NOTIFY_TIMEOUT { timeoutType: "QUEEN_EXCHANGE", autoAction: "RANDOM_SELECTED" }` → `NOTIFY_EXCHANGE_APPLE`（ガード保持時は `NOTIFY_GUARD_ACTIVATED`）→ `GAME_STATE_SYNC` の順で進行する
 
 ```json
 {

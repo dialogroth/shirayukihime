@@ -259,6 +259,9 @@ class GameService(
         // 全ての生存プレイヤーがプレイ済みなら一周完了 → エンディングへ
         val alivePlayerIds = state.players.values.filter { it.isAlive }.map { it.playerId }.toSet()
         if (alivePlayerIds.all { it in playedSet }) {
+            // 一周完了時点で呪いの指輪を持っている生存プレイヤーは全員死亡させる
+            // （手札交換／プレゼント交換の即時判定で漏れたケースの安全網）
+            killCursedRingHoldersInLastTurn(roomId)
             startEndingPhase(roomId)
             return
         }
@@ -266,6 +269,29 @@ class GameService(
         val nextIndex = nextAliveIndex(state, state.currentTurnIndex)
         GameStateManager.update(roomId) { it.copy(currentTurnIndex = nextIndex) }
         startTurn(roomId)
+    }
+
+    /**
+     * 最後の手番フェイズ中、呪いの指輪を手札に持っている生存プレイヤーを全員死亡させる。
+     *
+     * 呼び出しタイミング：
+     *  1) 手札交換／プレゼント交換の直後（指輪の押し付け・自害をその場で確定させる）
+     *  2) 最後の手番フェイズの一周完了直前（取りこぼし防止の安全網）
+     */
+    private suspend fun killCursedRingHoldersInLastTurn(roomId: UUID) {
+        val state = GameStateManager.get(roomId) ?: return
+        val holders = state.players.values
+            .filter { it.isAlive }
+            .filter { p -> state.handOf(p.playerId).any { it.cardType == CardType.CURSED_RING } }
+            .map { it.playerId }
+
+        for (pid in holders) {
+            killPlayer(roomId, pid, "CURSED_RING")
+        }
+        if (holders.isNotEmpty()) {
+            val newState = GameStateManager.get(roomId) ?: return
+            broadcastGameStateSync(roomId, newState)
+        }
     }
 
     private fun nextAliveIndex(state: GameState, currentIndex: Int): Int {
@@ -542,6 +568,12 @@ class GameService(
         broadcast(roomId, EventType.NOTIFY_EXCHANGE_HAND, NotifyExchangeHandPayload(playerId.toString(), targetId.toString()))
         val newState = GameStateManager.get(roomId) ?: return
         broadcastGameStateSync(roomId, newState)
+        // 最後の手番フェイズ中に呪いの指輪が移動した場合、新しい持ち主を即座に死亡させる
+        // （特に自分の手番終了後に指輪を押し付けられて次の手番が来ないケースを救う／
+        //   逆に「白雪姫から指輪をもらって自害する」という意図的な行動も成立する）
+        if (newState.phase == GamePhase.LAST_TURN) {
+            killCursedRingHoldersInLastTurn(roomId)
+        }
         advanceTurn(roomId)
     }
 
@@ -738,6 +770,11 @@ class GameService(
         }
         moveCardToDiscard(roomId, cardId)
         broadcast(roomId, EventType.NOTIFY_EXCHANGE_HAND, NotifyExchangeHandPayload(targetA.toString(), targetB.toString()))
+        // 最後の手番フェイズ中に呪いの指輪が移動した場合、新しい持ち主を即座に死亡させる
+        val postState = GameStateManager.get(roomId)
+        if (postState?.phase == GamePhase.LAST_TURN) {
+            killCursedRingHoldersInLastTurn(roomId)
+        }
     }
 
     private suspend fun handlePoisonComb(roomId: UUID, playerId: UUID, cardId: UUID, targetId: UUID) {
@@ -763,6 +800,14 @@ class GameService(
     private suspend fun requestPreference(roomId: UUID, askedBy: UUID, targetId: UUID, cardType: CardType) {
         val questionType = if (cardType == CardType.APPLE_QUESTION) "APPLE" else "MUSHROOM"
         pendingPreference[roomId] = targetId to questionType
+
+        // 対象が切断中の場合は REQUEST_PREFERENCE を送らず、即座に役職ベースの自動回答で進行する
+        val state = GameStateManager.get(roomId)
+        val targetPlayer = state?.players?.get(targetId)
+        if (targetPlayer != null && !targetPlayer.isConnected) {
+            handlePreferenceTimeout(roomId, targetId, questionType, askedBy)
+            return
+        }
 
         sendTo(roomId, targetId, EventType.REQUEST_PREFERENCE, RequestPreferencePayload(questionType, askedBy.toString()))
 
@@ -863,8 +908,21 @@ class GameService(
             .map { it.playerId.toString() }
         pendingQueenExchange[roomId] = true
         broadcastTurnChanged(roomId, queenPlayer.playerId)
+
+        // 女王が切断中なら REQUEST_QUEEN_EXCHANGE を送らず即座にランダム選択で進行
+        if (!queenPlayer.isConnected) {
+            handleQueenExchangeTimeout(roomId, queenPlayer.playerId)
+            return
+        }
+
         sendTo(roomId, queenPlayer.playerId, EventType.REQUEST_QUEEN_EXCHANGE,
             RequestQueenExchangePayload(targets))
+
+        // 3分タイムアウト（仕様：websocket_event_design.md §3-4）
+        queenExchangeTimerJobs[roomId] = scope.launch {
+            delay(180_000)
+            handleQueenExchangeTimeout(roomId, queenPlayer.playerId)
+        }
     }
 
     /** 女王の特権完了後：ホストボタン待ちへ（リンゴ公開はボタン押下後に実行） */
@@ -903,11 +961,12 @@ class GameService(
 
     private suspend fun handleQueenExchangeTimeout(roomId: UUID, queenPlayerId: UUID) {
         if (pendingQueenExchange[roomId] != true) return
-        pendingQueenExchange.remove(roomId)
+        queenExchangeTimerJobs.remove(roomId)?.cancel()
 
         val state = GameStateManager.get(roomId) ?: return
         val aliveTargets = state.players.values.filter { it.isAlive && it.playerId != queenPlayerId }
         val randomTarget = aliveTargets.randomOrNull() ?: run {
+            pendingQueenExchange.remove(roomId)
             revealAllApplesAndProceed(roomId)
             return
         }
@@ -915,6 +974,7 @@ class GameService(
         broadcast(roomId, EventType.NOTIFY_TIMEOUT, NotifyTimeoutPayload(
             "QUEEN_EXCHANGE", queenPlayerId.toString(), "RANDOM_SELECTED"
         ))
+        // handleQueenExchangeResponse 側で pendingQueenExchange.remove する
         handleQueenExchangeResponse(roomId, queenPlayerId, randomTarget.playerId)
     }
 

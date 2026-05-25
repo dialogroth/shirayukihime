@@ -61,6 +61,7 @@
 | ルーム待機 | `ROOM_DISBANDED` | 解散通知オーバーレイが表示される |
 | ゲームメイン | `PHASE_CHANGED { newPhase: "LAST_TURN" }` | フェイズバー「ストーリーフェイズ」→「最後の手番フェイズ」＋オーバーレイ通知 |
 | ゲームメイン | `PHASE_CHANGED { newPhase: "ENDING_QUEEN" }` | オーバーレイ通知「👑 エンディング: 女王の特権」 |
+”| ゲームメイン | `NOTIFY_APPLE_PUBLICLY_REVEALED`（ENDING_QUEEN中・女王のリンゴ） | リンゴが毒なら「👑 女王のリンゴは🍎毒リンゴでした！女王は交換対象を選択できます」、安全なら「👑 女王のリンゴは🍏安全リンゴでした！リンゴ交換は発生しません」をログ表示＋トースト通知 |
 | ゲームメイン | `WAITING_HOST_PROCEED { nextPhase: "ENDING_REVEAL" }` | ホストには「エンディングに進む」ボタンが表示される。非ホストには「ホストの操作を待っています…」を表示。タイムアウトなし |
 | ゲームメイン | `PHASE_CHANGED { newPhase: "ENDING_REVEAL" }` + 連続する `NOTIFY_APPLE_PUBLICLY_REVEALED` | 全プレイヤーのリンゴが順次公開される |
 | ゲームメイン | `ENDING_REVEAL_PLAYER` | 4秒間隔で1人ずつ役職・陣営・リンゴ・生死を全画面オーバーレイで表示 |

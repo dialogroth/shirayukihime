@@ -11,6 +11,24 @@ import repository.PlayerRepository
 import repository.RoomRepository
 import service.RoomService
 
+/**
+ * ユーザー名のバリデーション。
+ * - 1〜12文字
+ * - HTMLタグ等に使われる文字（< > & " ' `）を含まない
+ * - 制御文字を含まない
+ *
+ * @return エラーメッセージ。問題なければ null。
+ */
+private fun validateUserName(name: String): String? {
+    if (name.isBlank() || name.length > 12)
+        return "ユーザー名は1〜12文字で入力してください"
+    if (name.any { it.isISOControl() })
+        return "ユーザー名に使用できない制御文字が含まれています"
+    if (name.any { it in "<>&\"'`" })
+        return "ユーザー名に使用できない記号が含まれています（< > & \" ' ` は使用不可）"
+    return null
+}
+
 fun Route.roomRoutes(
     roomService: RoomService,
     roomRepository: RoomRepository,
@@ -21,8 +39,9 @@ fun Route.roomRoutes(
         post {
             val req = call.receive<CreateRoomRequest>()
 
-            if (req.userName.isBlank() || req.userName.length > 12)
-                return@post call.respond(HttpStatusCode.BadRequest, ErrorResponse("ユーザー名は1〜12文字で入力してください"))
+            validateUserName(req.userName)?.let {
+                return@post call.respond(HttpStatusCode.BadRequest, ErrorResponse(it))
+            }
 
             val cardSettings = req.cardSettings.mapNotNull { cs ->
                 runCatching { CardType.valueOf(cs.cardType) to cs.count }.getOrNull()
@@ -73,8 +92,9 @@ fun Route.roomRoutes(
                 val roomCode = call.parameters["roomCode"] ?: return@post call.respond(HttpStatusCode.BadRequest, ErrorResponse("ルームコードが必要です"))
                 val req = call.receive<JoinRoomRequest>()
 
-                if (req.userName.isBlank() || req.userName.length > 12)
-                    return@post call.respond(HttpStatusCode.BadRequest, ErrorResponse("ユーザー名は1〜12文字で入力してください"))
+                validateUserName(req.userName)?.let {
+                    return@post call.respond(HttpStatusCode.BadRequest, ErrorResponse(it))
+                }
 
                 val result = runCatching {
                     roomService.joinRoom(roomCode, req.userName)

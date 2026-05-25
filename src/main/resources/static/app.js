@@ -51,6 +51,8 @@ const FACTION_NAMES = {
 function showScreen(name) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById('screen-' + name).classList.add('active');
+  // 画面遷移時にフォームエラーをクリア
+  document.querySelectorAll('.form-error').forEach(el => { el.textContent = ''; el.style.display = 'none'; });
   state.screen = name;
 }
 
@@ -161,7 +163,7 @@ function handleServerEvent(msg) {
     case 'YOUR_APPLE_STATUS':
       state.myApple = payload;
       renderMyApple();
-      log(`あなたのリンゴ: ${payload.isPoisoned ? '🍎毒' : '🍏安全'}`);
+      log(`あなたのリンゴ: ${payload.isPoisoned ? '☠️ 毒リンゴ' : '✅ 安全リンゴ'}`);
       break;
     case 'BLACK_APPLE_UPDATE':
       log(`毒リンゴ位置が更新されました`);
@@ -198,7 +200,20 @@ function handleServerEvent(msg) {
       }
       break;
     case 'NOTIFY_APPLE_PUBLICLY_REVEALED':
-      log(`${getPlayerName(payload.holderPlayerId)} のリンゴが公開されました: ${payload.isPoisoned ? '🍎毒' : '🍏安全'}`);
+      log(`${getPlayerName(payload.holderPlayerId)} のリンゴが公開されました: ${payload.isPoisoned ? '☠️ 毒リンゴ' : '✅ 安全リンゴ'}`);
+      // ENDING_QUEEN フェイズで女王のリンゴが公開された場合、結果に応じた追加通知を出す
+      if (state.gameState?.phase === 'ENDING_QUEEN') {
+        const holder = (state.gameState?.players || []).find(p => p.playerId === payload.holderPlayerId);
+        if (holder?.role === 'QUEEN') {
+          if (payload.isPoisoned) {
+            log(`👑 女王のリンゴは☠️ 毒リンゴでした！女王は交換対象を選択できます`);
+            showToast('女王のリンゴは毒リンゴでした');
+          } else {
+            log(`👑 女王のリンゴは✅ 安全リンゴでした！リンゴ交換は発生しません`);
+            showToast('女王のリンゴは安全リンゴでした（交換なし）');
+          }
+        }
+      }
       break;
     case 'NOTIFY_ROULETTE':
       log(`アップルルーレット! ${payload.direction === 'CLOCKWISE' ? '時計回り' : '反時計回り'}に${payload.steps}個移動`);
@@ -483,10 +498,14 @@ function renderPlayers(players) {
     if (p.mushroomPreferenceAnswer !== null && p.mushroomPreferenceAnswer !== undefined)
       prefs += p.mushroomPreferenceAnswer ? '🍄👍' : '🍄👎';
 
-    let appleIcon = '🔮'; // unknown
+    let appleIcon = '<span class="apple-unknown">🔮 不明</span>';
     if (state.gameState && state.gameState.apples) {
       const apple = state.gameState.apples.find(a => a.currentHolderPlayerId === p.playerId);
-      if (apple && apple.isPoisoned !== null && apple.isPoisoned !== undefined) appleIcon = apple.isPoisoned ? '🍎' : '🍏';
+      if (apple && apple.isPoisoned !== null && apple.isPoisoned !== undefined) {
+        appleIcon = apple.isPoisoned
+          ? '<span class="apple-poison">☠️ 毒</span>'
+          : '<span class="apple-safe">✅ 安全</span>';
+      }
     }
 
     let roleLabel = '';
@@ -504,9 +523,17 @@ function renderPlayers(players) {
 // === Render Apple ===
 function renderMyApple() {
   const el = document.getElementById('my-apple');
+  el.className = '';
   if (state.myApple && state.myApple.isPoisoned !== null && state.myApple.isPoisoned !== undefined) {
-    el.textContent = state.myApple.isPoisoned ? '🍎 あなたのリンゴ: 毒リンゴ' : '🍏 あなたのリンゴ: 安全';
+    if (state.myApple.isPoisoned) {
+      el.className = 'my-apple-poison';
+      el.innerHTML = '☠️ あなたのリンゴ：<strong>毒リンゴ</strong>';
+    } else {
+      el.className = 'my-apple-safe';
+      el.innerHTML = '✅ あなたのリンゴ：<strong>安全リンゴ</strong>';
+    }
   } else {
+    el.className = 'my-apple-unknown';
     el.textContent = '🔮 あなたのリンゴ: 不明';
   }
 }
@@ -886,7 +913,11 @@ function showEndingRevealPlayer(payload) {
       <div style="font-size:0.8rem;color:#888;margin-bottom:4px;">公開 ${payload.revealIndex + 1} / ${payload.totalPlayers}</div>
       <div style="font-size:1.3rem;font-weight:bold;margin-bottom:8px;">${payload.userName}</div>
       <div style="font-size:1rem;margin-bottom:4px;">役職: <strong>${roleName}</strong>（${factionName}）</div>
-      <div style="font-size:1.1rem;margin-bottom:4px;">${payload.isPoisoned ? '🍎 毒リンゴ' : '🍏 安全リンゴ'}</div>
+      <div style="font-size:1.1rem;margin-bottom:4px;">
+        <span class="${payload.isPoisoned ? 'apple-poison' : 'apple-safe'}" style="font-size:1.1rem;padding:4px 12px;">
+          ${payload.isPoisoned ? '☠️ 毒リンゴ' : '✅ 安全リンゴ'}
+        </span>
+      </div>
       <div style="font-size:1.2rem;font-weight:bold;color:${payload.isAlive ? '#10b981' : '#ef4444'};">${aliveLabel}</div>
     </div>
   `;
@@ -1111,11 +1142,21 @@ function renderSeatCircle() {
 }
 
 // === Username validation ===
+// サーバー側 validateUserName と同じルール
+function validateUserName(name) {
+  if (!name || name.length === 0) return 'ユーザー名を入力してください';
+  if (name.length > 12) return 'ユーザー名は12文字以下で入力してください';
+  if (/[\x00-\x1F\x7F]/.test(name)) return 'ユーザー名に使用できない制御文字が含まれています';
+  if (/[<>&"'`]/.test(name)) return 'ユーザー名に使用できない記号が含まれています（< > & " \' ` は使用不可）';
+  return null;
+}
 document.getElementById('input-username').addEventListener('input', (e) => {
-  const valid = e.target.value.trim().length > 0;
+  const err = validateUserName(e.target.value.trim());
+  const valid = err === null;
   document.getElementById('btn-create-room').disabled = !valid;
   document.getElementById('btn-join-room').disabled = !valid;
   document.getElementById('btn-rejoin-room').disabled = !valid;
+  showFormError('username-error', valid ? '' : err);
 });
 
 // === Event listeners ===
@@ -1174,9 +1215,20 @@ document.getElementById('btn-do-create').onclick = async () => {
   } catch(e) { alert(e.message); }
 };
 
+function showFormError(elId, message) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  el.textContent = message;
+  el.style.display = message ? 'block' : 'none';
+}
+
 document.getElementById('btn-do-join').onclick = async () => {
   const code = document.getElementById('input-room-code').value.trim();
-  if (!code) return alert('コードを入力してください');
+  showFormError('join-error', '');
+  if (!code) {
+    showFormError('join-error', 'コードを入力してください');
+    return;
+  }
   try {
     const data = await api('POST', '/' + code + '/join', { userName: state.username });
     state.roomId = data.roomId;
@@ -1190,12 +1242,18 @@ document.getElementById('btn-do-join').onclick = async () => {
     connectWs();
     pollRoom();
     state.pollInterval = setInterval(pollRoom, 3000);
-  } catch(e) { alert(e.message); }
+  } catch(e) {
+    showFormError('join-error', e.message);
+  }
 };
 
 document.getElementById('btn-do-rejoin').onclick = async () => {
   const code = document.getElementById('input-rejoin-code').value.trim();
-  if (!code) return alert('ルームコードを入力してください');
+  showFormError('rejoin-error', '');
+  if (!code) {
+    showFormError('rejoin-error', 'ルームコードを入力してください');
+    return;
+  }
   try {
     const data = await api('POST', '/' + code + '/rejoin', { userName: state.username });
     state.roomId = data.roomId;
@@ -1218,7 +1276,9 @@ document.getElementById('btn-do-rejoin').onclick = async () => {
       pollRoom();
       state.pollInterval = setInterval(pollRoom, 3000);
     }
-  } catch(e) { alert(e.message); }
+  } catch(e) {
+    showFormError('rejoin-error', e.message);
+  }
 };
 
 document.getElementById('btn-start-game').onclick = () => {

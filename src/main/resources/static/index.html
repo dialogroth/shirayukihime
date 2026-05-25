@@ -14,6 +14,7 @@
   <div class="card">
     <label>ユーザー名</label>
     <input type="text" id="input-username" maxlength="12" placeholder="名前を入力（1〜12文字）">
+    <div id="username-error" class="form-error" style="display:none;"></div>
     <div class="btn-group">
       <button id="btn-create-room" disabled>部屋を作る</button>
       <button id="btn-join-room" disabled>部屋に入る</button>
@@ -72,6 +73,7 @@
     <label>ルームコード</label>
     <input type="text" id="input-room-code" maxlength="6" placeholder="6桁の数字を入力" inputmode="numeric" pattern="[0-9]{6}">
     <button id="btn-do-join">参加する</button>
+    <div id="join-error" class="form-error" style="display:none;"></div>
     <button class="btn-back" data-back="start">戻る</button>
   </div>
 </section>
@@ -83,6 +85,7 @@
     <label>ルームコード</label>
     <input type="text" id="input-rejoin-code" maxlength="6" placeholder="6桁の数字を入力" inputmode="numeric" pattern="[0-9]{6}">
     <button id="btn-do-rejoin">復帰する</button>
+    <div id="rejoin-error" class="form-error" style="display:none;"></div>
     <button class="btn-back" data-back="start">戻る</button>
   </div>
 </section>

@@ -50,10 +50,16 @@ fun Route.webSocketRoutes(
             return@webSocket
         }
 
-        val isReconnect = connectionManager.isConnected(roomId, playerId)
+        // 再接続判定：
+        // 旧コードは connectionManager.isConnected() で判定していたが、
+        // 直前の切断時に finally ブロックで removeSession 済みのため常に false となり、
+        // 実際の再接続が「新規参加」扱いになる不具合があった。
+        // ゲーム状態が存在し、かつ自分がそのゲームの参加プレイヤーであれば再接続とみなす。
+        val isReconnect = GameStateManager.exists(roomId) &&
+            GameStateManager.get(roomId)?.players?.containsKey(playerId) == true
         connectionManager.addSession(roomId, playerId, this)
 
-        if (isReconnect && GameStateManager.exists(roomId)) {
+        if (isReconnect) {
             launch { gameService.handlePlayerReconnect(roomId, playerId) }
         } else {
             // 他プレイヤーへ参加通知
