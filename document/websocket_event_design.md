@@ -486,6 +486,28 @@ ws://<host>/ws/game?roomId=<roomId>&playerId=<playerId>
 }
 ```
 
+#### HOST_TRANSFERRED（ホスト権限の自動移譲）
+
+- **送信先：** ルーム内の全プレイヤー
+- **タイミング：** ゲーム中にホストが切断され、座席順で次のプレイヤーへホスト権限を自動移譲したとき
+- **送信条件：**
+  - 現在のホストが WebSocket 切断
+  - `seatOrder` が現在ホストより**大きく**、かつ `isConnected = true` のプレイヤーが1人以上いる（最小の `seatOrder` を新ホストとする）
+  - 候補が存在しない場合は本イベントを送信せず、代わりに `NOTIFY_TIMEOUT { timeoutType: "NO_HOST_AVAILABLE" }` → `GAME_RESULT { reason: "NO_HOST_AVAILABLE" }` を送信してゲームを強制終了する
+- **クライアント挙動：** 自分が新ホストになったかを判定し、ホスト専用 UI（エンディング進行ボタン等）を更新。全員のログにホスト変更を表示。
+
+```json
+{
+  "type": "HOST_TRANSFERRED",
+  "payload": {
+    "newHostPlayerId": "UUID",
+    "newHostUserName": "string",
+    "previousHostPlayerId": "UUID",
+    "reason": "DISCONNECTED"
+  }
+}
+```
+
 #### SEATS_SWAPPED（座席入れ替え完了）
 
 - **送信先：** ルーム内の全プレイヤー
@@ -540,6 +562,9 @@ ws://<host>/ws/game?roomId=<roomId>&playerId=<playerId>
 #### YOUR_INITIAL_INFO（初期個人情報 - 各プレイヤーへ個別送信）
 
 - **送信先：** 各プレイヤーへ個別に送信
+- **送信タイミング：**
+  1. `GAME_STARTED` 直後（初回）
+  2. **プレイヤーが切断後に再接続したとき**（当該プレイヤーのみへ再送）。役職・陣営・自分のリンゴ・手札・緑視点の白雪姫ID／黒視点の毒リンゴ保持者IDといった「個人にしか送られない情報」がリロード後に欠落するのを防ぐため
 - **内容：** 受信者の権限に応じた初期情報をすべて含む
 
 ```json
@@ -1356,6 +1381,8 @@ Server → 全員 : GAME_RESULT {
   ※GAME_RESULTの reason フィールドは以下の値を持つ
   "NORMAL"                  - 通常の勝敗判定
   "SNOW_WHITE_DISCONNECTED" - 白雪姫の切断による強制終了
+  "SNOW_WHITE_KILLED"       - 白雪姫の毒の櫛・呪いの指輪による強制終了
+  "NO_HOST_AVAILABLE"       - ホスト権限を譲渡可能なプレイヤーがいなくなったことによる強制終了（winFaction = "NONE"）
 ```
 
 > **注意：** 白雪姫の1分タイムアウト確定時はエンディングフェイズに移行せず、即座に `GAME_RESULT` を送信する。リンゴ公開（`NOTIFY_APPLE_PUBLICLY_REVEALED`）や `PHASE_CHANGED` は行わない。フロントエンドは `reason: "SNOW_WHITE_DISCONNECTED"` を受け取った場合、通常の勝敗画面とは異なるメッセージ（「白雪姫が切断したためゲームが終了しました」）を表示する。

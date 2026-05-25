@@ -245,11 +245,26 @@ function handleServerEvent(msg) {
       if (payload.autoAction === 'ホストの操作が行われませんでした') {
         log(`⏰ ホストの操作が行われませんでした。自動的に進行します。`);
         showToast('ホストの操作が行われませんでした');
+      } else if (payload.timeoutType === 'NO_HOST_AVAILABLE') {
+        log(`🚫 ${payload.autoAction || 'ホスト権限を持つプレイヤーが存在しません'}`);
+        showToast(payload.autoAction || 'ホスト権限を持つプレイヤーが存在しません');
       } else {
         log(`⏰ ${getPlayerName(payload.playerId)} がタイムアウトしました`);
       }
       break;
+    case 'HOST_TRANSFERRED':
+      // ホスト権限が他プレイヤーへ移譲された
+      log(`👑 ホスト権限が ${payload.newHostUserName} に移譲されました（理由: ${payload.reason || 'DISCONNECTED'}）`);
+      showToast(`ホスト権限が ${payload.newHostUserName} に移譲されました`);
+      // 自分が新ホストになったかどうかを更新
+      state.isHost = (payload.newHostPlayerId === state.playerId);
+      // ホスト操作待ち表示中なら再描画
+      if (typeof state.waitingNextPhase === 'string' && state.waitingNextPhase) {
+        showWaitingHostProceed(state.waitingNextPhase);
+      }
+      break;
     case 'WAITING_HOST_PROCEED':
+      state.waitingNextPhase = payload.nextPhase;
       showWaitingHostProceed(payload.nextPhase);
       break;
     case 'NOTIFY_THINK_TIME':
@@ -978,6 +993,8 @@ function showGameResult(payload) {
     title.textContent = '白雪姫が切断したためゲームが終了しました';
   } else if (payload.reason === 'SNOW_WHITE_KILLED') {
     title.textContent = '白雪姫が倒れました… 女王陣営の勝利！';
+  } else if (payload.reason === 'NO_HOST_AVAILABLE') {
+    title.textContent = 'ホスト権限を持つプレイヤーが存在しません。ゲームを強制終了しました';
   } else {
     title.textContent = `${FACTION_NAMES[payload.winFaction] || payload.winFaction} の勝利！`;
   }

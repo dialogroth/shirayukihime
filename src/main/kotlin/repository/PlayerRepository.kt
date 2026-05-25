@@ -53,6 +53,12 @@ class PlayerRepository {
         }
     }
 
+    fun updateIsHost(id: UUID, isHost: Boolean) = transaction {
+        Players.update({ Players.id eq id }) {
+            it[Players.isHost] = isHost
+        }
+    }
+
     fun updateSeatOrder(id: UUID, newSeatOrder: Int) = transaction {
         Players.update({ Players.id eq id }) {
             it[Players.seatOrder] = newSeatOrder

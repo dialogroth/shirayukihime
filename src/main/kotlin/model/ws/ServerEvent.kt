@@ -200,6 +200,15 @@ class NotifyRematchStartingPayload
 @Serializable
 data class WaitingHostProceedPayload(val nextPhase: String)
 
+// ── ホスト権限の移譲 ─────────────────────────────────────
+@Serializable
+data class HostTransferredPayload(
+    val newHostPlayerId: String,
+    val newHostUserName: String,
+    val previousHostPlayerId: String,
+    val reason: String = "DISCONNECTED"
+)
+
 object EventType {
     const val PLAYER_JOINED = "PLAYER_JOINED"
     const val PLAYER_DISCONNECTED = "PLAYER_DISCONNECTED"
@@ -237,5 +246,6 @@ object EventType {
     const val SEATS_SWAPPED = "SEATS_SWAPPED"
     const val DRAG_SEAT_UPDATE = "DRAG_SEAT_UPDATE"
     const val WAITING_HOST_PROCEED = "WAITING_HOST_PROCEED"
+    const val HOST_TRANSFERRED = "HOST_TRANSFERRED"
     const val ERROR = "ERROR"
 }

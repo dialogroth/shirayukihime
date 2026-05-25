@@ -882,18 +882,25 @@ class GameService(
         }
 
         val queenApple = state.appleOf(queenPlayer.playerId) ?: return revealAllApplesAndProceed(roomId)
-        // 女王のリンゴを全体公開
+        // 女王のリンゴ公開と同時に女王の役職を全体公開する
+        // （クライアント側で「公開されたリンゴが女王のもの」と判定できるようにするため）
         GameStateManager.update(roomId) { s ->
             val updatedApples = s.apples.map {
                 if (it.appleId == queenApple.appleId) it.copy(isPubliclyRevealed = true) else it
             }
-            s.copy(apples = updatedApples)
+            val updatedQueen = s.players[queenPlayer.playerId]?.copy(isRoleRevealed = true)
+            val updatedPlayers = if (updatedQueen != null)
+                s.players + (queenPlayer.playerId to updatedQueen) else s.players
+            s.copy(apples = updatedApples, players = updatedPlayers)
         }
+        // 順序重要：先に GAME_STATE_SYNC（女王の isRoleRevealed=true を含む）を送ってから
+        // NOTIFY_APPLE_PUBLICLY_REVEALED を送る。逆順だとクライアントが「公開されたリンゴが女王のものか」を
+        // 判定できず、安全/毒に応じた追加通知が出せない。
+        val newState = GameStateManager.get(roomId) ?: return
+        broadcastGameStateSync(roomId, newState)
         broadcast(roomId, EventType.NOTIFY_APPLE_PUBLICLY_REVEALED, NotifyApplePubliclyRevealedPayload(
             queenApple.appleId.toString(), queenPlayer.playerId.toString(), queenApple.isPoisoned
         ))
-        val newState = GameStateManager.get(roomId) ?: return
-        broadcastGameStateSync(roomId, newState)
 
         if (!queenApple.isPoisoned) {
             // 通常リンゴ → 交換なし
@@ -1107,6 +1114,87 @@ class GameService(
         endGameQueenWins(roomId, "SNOW_WHITE_DISCONNECTED")
     }
 
+    // ── ホスト権限の自動移譲 ─────────────────────────────────────────
+
+    /**
+     * 切断したプレイヤーが現在のホストだった場合、座席順で次のプレイヤーへホスト権限を移譲する。
+     *
+     * - 次の候補：`seatOrder` が現在ホストより**大きく**、かつ `isConnected = true` のプレイヤーのうち最小の `seatOrder`
+     *   （切断中のプレイヤーはスキップする）
+     * - 候補が見つからない（座席末尾までで誰も接続していない）場合は、
+     *   「ホスト権限を持つプレイヤーが存在しません」とログ通知してゲームを強制終了する
+     *   （仕様：一周して元のホストに戻ることはしない）
+     *
+     * @return ゲームを強制終了したら true（呼び出し元は以降の処理をスキップすべき）
+     */
+    private suspend fun migrateHostOnDisconnect(roomId: UUID, disconnectedPlayerId: UUID): Boolean {
+        val room = roomRepository.findById(roomId) ?: return false
+        if (room.hostPlayerId != disconnectedPlayerId) return false
+
+        val state = GameStateManager.get(roomId) ?: return false
+        val previousHost = state.players[disconnectedPlayerId] ?: return false
+
+        val candidate = state.players.values
+            .filter { it.seatOrder > previousHost.seatOrder && it.isConnected && it.playerId != disconnectedPlayerId }
+            .minByOrNull { it.seatOrder }
+
+        if (candidate == null) {
+            // 候補なし → ゲーム強制終了
+            forceEndGameNoHostAvailable(roomId)
+            return true
+        }
+
+        // DB と GameState を更新
+        playerRepository.updateIsHost(disconnectedPlayerId, false)
+        playerRepository.updateIsHost(candidate.playerId, true)
+        roomRepository.updateHost(roomId, candidate.playerId)
+
+        broadcast(roomId, EventType.HOST_TRANSFERRED, HostTransferredPayload(
+            newHostPlayerId = candidate.playerId.toString(),
+            newHostUserName = candidate.userName,
+            previousHostPlayerId = disconnectedPlayerId.toString(),
+            reason = "DISCONNECTED"
+        ))
+        return false
+    }
+
+    /**
+     * ホスト候補が誰もいない場合のゲーム強制終了。
+     * `NOTIFY_TIMEOUT` 風のメッセージで全員に通知後、`GAME_RESULT { reason = "NO_HOST_AVAILABLE" }` を送る。
+     */
+    private suspend fun forceEndGameNoHostAvailable(roomId: UUID) {
+        // 全員へ「ホスト権限を持つプレイヤーが存在しません」のログ通知
+        // NOTIFY_TIMEOUT の autoAction を流用して文字列を載せる（既存クライアントが showToast 対応済み）
+        broadcast(roomId, EventType.NOTIFY_TIMEOUT, NotifyTimeoutPayload(
+            timeoutType = "NO_HOST_AVAILABLE",
+            playerId = "",
+            autoAction = "ホスト権限を持つプレイヤーが存在しません"
+        ))
+
+        val state = GameStateManager.update(roomId) { it.copy(phase = GamePhase.FINISHED) }
+        roomRepository.updateStatus(roomId, RoomStatus.FINISHED)
+
+        val resultPlayers = state?.players?.values?.map { p ->
+            val apple = state.appleOf(p.playerId)
+            GameResultPlayer(
+                playerId = p.playerId.toString(),
+                userName = p.userName,
+                role = p.role.name,
+                faction = p.faction.name,
+                isAlive = p.isAlive,
+                isWinner = false,
+                apple = AppleInfo(apple?.appleId.toString(), apple?.isPoisoned ?: false)
+            )
+        } ?: emptyList()
+
+        broadcast(roomId, EventType.GAME_RESULT, GameResultPayload(
+            winFaction = "NONE",
+            reason = "NO_HOST_AVAILABLE",
+            players = resultPlayers
+        ))
+        GameStateManager.remove(roomId)
+    }
+
     // ── 再ゲーム ─────────────────────────────────────────────────────
 
     suspend fun handleRematch(roomId: UUID, playerId: UUID) {
@@ -1133,6 +1221,13 @@ class GameService(
         GameStateManager.update(roomId) { s ->
             s.copy(players = s.players + (playerId to player.copy(isConnected = false)))
         }
+
+        // ── ホスト権限の自動移譲 ──
+        // 切断したのが現在のホストなら、座席番号で次のプレイヤーへ移譲する。
+        // 候補：seatOrder が現在のホストより大きく、かつ接続中のプレイヤーのうち最小の seatOrder。
+        // 候補がいなければ「ホスト権限を持つプレイヤーが存在しません」と通知してゲーム強制終了。
+        val gameEnded = migrateHostOnDisconnect(roomId, playerId)
+        if (gameEnded) return
 
         val newState = GameStateManager.get(roomId) ?: return
         broadcastGameStateSync(roomId, newState)
@@ -1163,6 +1258,27 @@ class GameService(
             val player = s.players[playerId] ?: return@update s
             s.copy(players = s.players + (playerId to player.copy(isConnected = true)))
         } ?: return
+
+        // 再接続したプレイヤーへ YOUR_INITIAL_INFO を再送する。
+        // 初回送信は GAME_STARTED 直後の sendAllInitialInfo でのみ行われるため、
+        // 再接続時に送らないと役職・陣営・自分のリンゴ・手札（緑視点の白雪姫ID／黒視点の毒リンゴ保持者）
+        // といった「個人にしか送らない情報」がクライアントから欠落したままになる。
+        val me = state.players[playerId]
+        val myApple = state.appleOf(playerId)
+        if (me != null && myApple != null) {
+            val snowWhiteId = state.players.values.find { it.role == Role.SNOW_WHITE }?.playerId
+            val myHand = state.handOf(playerId).map { CardInfo(it.cardId.toString(), it.cardType.name) }
+            val payload = YourInitialInfoPayload(
+                role = me.role.name,
+                faction = me.faction.name,
+                myApple = AppleInfo(myApple.appleId.toString(), myApple.isPoisoned),
+                myHand = myHand,
+                snowWhitePlayerId = if (me.role == Role.GREEN) snowWhiteId?.toString() else null,
+                poisonAppleHolderIds = if (me.role == Role.BLACK)
+                    state.apples.filter { it.isPoisoned }.map { it.currentHolderPlayerId.toString() } else null
+            )
+            sendTo(roomId, playerId, EventType.YOUR_INITIAL_INFO, payload)
+        }
 
         broadcastGameStateSync(roomId, state)
 
