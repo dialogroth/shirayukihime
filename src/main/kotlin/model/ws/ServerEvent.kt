@@ -209,6 +209,17 @@ data class HostTransferredPayload(
     val reason: String = "DISCONNECTED"
 )
 
+// ── 切断中プレイヤーの手番待ち ─────────────────────────────
+// 手番が回ってきたプレイヤーが切断中の場合に全員へ配信される。
+// 通常の TURN_CHANGED とは別に、行動UIを完全に隠して
+// 「{userName} が切断中です。復帰を待っています…」を表示させる。
+@Serializable
+data class WaitingForDisconnectedPlayerPayload(
+    val playerId: String,
+    val userName: String,
+    val timeoutSeconds: Int = 60
+)
+
 object EventType {
     const val PLAYER_JOINED = "PLAYER_JOINED"
     const val PLAYER_DISCONNECTED = "PLAYER_DISCONNECTED"
@@ -247,5 +258,6 @@ object EventType {
     const val DRAG_SEAT_UPDATE = "DRAG_SEAT_UPDATE"
     const val WAITING_HOST_PROCEED = "WAITING_HOST_PROCEED"
     const val HOST_TRANSFERRED = "HOST_TRANSFERRED"
+    const val WAITING_FOR_DISCONNECTED_PLAYER = "WAITING_FOR_DISCONNECTED_PLAYER"
     const val ERROR = "ERROR"
 }

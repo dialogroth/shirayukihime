@@ -205,12 +205,35 @@ class GameService(
         }
 
         // 切断プレイヤーの手番（1分待って死亡扱い）
+        //
+        // 重要：このイベントを発火しないと、各クライアントは前手番プレイヤーの
+        // 行動UIを表示したままになる（直前の broadcastGameStateSync は
+        // currentTurnPlayerId が前手番のままで送信されているため）。
+        //
+        // 全員に「{userName} が切断中です。復帰を待っています…」を表示させ、
+        // 同時に currentTurnPlayerId を切断中プレイヤーに更新するための
+        // TURN_CHANGED も送る（クライアント側でハイライト更新のため）。
+        // 通常のターンタイマー(180秒)は起動しない。
         if (!player.isConnected) {
-            val job = scope.launch {
-                delay(60_000)
-                handleDisconnectTimeout(roomId, currentPlayerId)
+            // 既存の disconnect タイマーが回っているなら新しく起動しない
+            // （PLAYER_DISCONNECTED 時に 60s タイマーを既に起動している可能性）
+            if (disconnectTimerJobs[currentPlayerId] == null) {
+                val job = scope.launch {
+                    delay(60_000)
+                    handleDisconnectTimeout(roomId, currentPlayerId)
+                }
+                disconnectTimerJobs[currentPlayerId] = job
             }
-            disconnectTimerJobs[currentPlayerId] = job
+            // currentTurnPlayerId を含む SYNC を再送（前のSYNCは旧手番のままだった）
+            broadcastGameStateSync(roomId, state)
+            broadcast(roomId, EventType.TURN_CHANGED,
+                TurnChangedPayload(currentPlayerId.toString(), 0))
+            broadcast(roomId, EventType.WAITING_FOR_DISCONNECTED_PLAYER,
+                WaitingForDisconnectedPlayerPayload(
+                    playerId = currentPlayerId.toString(),
+                    userName = player.userName,
+                    timeoutSeconds = 60
+                ))
             return
         }
 
@@ -1155,6 +1178,18 @@ class GameService(
             previousHostPlayerId = disconnectedPlayerId.toString(),
             reason = "DISCONNECTED"
         ))
+
+        // ホスト操作待ち状態が残っているなら、新ホストの画面に
+        // 「エンディングに進む / 結果画面に進む」ボタンを再表示するため
+        // WAITING_HOST_PROCEED を再ブロードキャストする。
+        // （クライアントの HOST_TRANSFERRED ハンドラだけだと、
+        //   state.waitingNextPhase がたまたま欠落していると button が出ない）
+        when {
+            pendingProceedToReveal[roomId] == true ->
+                broadcast(roomId, EventType.WAITING_HOST_PROCEED, WaitingHostProceedPayload("ENDING_REVEAL"))
+            pendingProceedToResult[roomId] == true ->
+                broadcast(roomId, EventType.WAITING_HOST_PROCEED, WaitingHostProceedPayload("RESULT"))
+        }
         return false
     }
 
@@ -1282,9 +1317,20 @@ class GameService(
 
         broadcastGameStateSync(roomId, state)
 
-        if (state.currentTurnPlayerId() == playerId) {
-            broadcastTurnChanged(roomId, playerId)
+        if (state.currentTurnPlayerId() == playerId &&
+            state.phase in listOf(GamePhase.STORY, GamePhase.LAST_TURN)) {
+            // 切断中に手番が回ってきていた場合：通常の3分タイマーで手番開始
             startTurnTimer(roomId, playerId)
+            broadcastTurnChanged(roomId, playerId)
+        }
+
+        // ホスト操作待ち状態が残っているなら、再接続した本人にも届くよう
+        // WAITING_HOST_PROCEED を再ブロードキャストする。
+        when {
+            pendingProceedToReveal[roomId] == true ->
+                broadcast(roomId, EventType.WAITING_HOST_PROCEED, WaitingHostProceedPayload("ENDING_REVEAL"))
+            pendingProceedToResult[roomId] == true ->
+                broadcast(roomId, EventType.WAITING_HOST_PROCEED, WaitingHostProceedPayload("RESULT"))
         }
     }
 

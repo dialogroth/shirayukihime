@@ -508,6 +508,33 @@ ws://<host>/ws/game?roomId=<roomId>&playerId=<playerId>
 }
 ```
 
+> **補足：** `HOST_TRANSFERRED` 直後、サーバー側でホスト操作待ち状態（`pendingProceedToReveal` / `pendingProceedToResult`）が残っている場合は、続けて `WAITING_HOST_PROCEED { nextPhase }` を再ブロードキャストする。これにより、新ホストの画面に「エンディングに進む／結果画面に進む」ボタンが確実に表示される。同様に、ホスト操作待ち中にプレイヤーが再接続した際もサーバーは `WAITING_HOST_PROCEED` を再送する。
+
+#### WAITING_FOR_DISCONNECTED_PLAYER（切断中プレイヤーの手番待ち）
+
+- **送信先：** ルーム内の全プレイヤー
+- **タイミング：** ターン進行で `currentTurnPlayerId` が切断中のプレイヤーになった瞬間
+- **送信順序：** 同一ターン進行内で `GAME_STATE_SYNC` → `TURN_CHANGED { timeoutSeconds: 0 }` → `WAITING_FOR_DISCONNECTED_PLAYER` の順で送る
+  - `timeoutSeconds: 0` の `TURN_CHANGED` は「切断中の手番」を示すマーカーとし、クライアントは通常の 3 分タイマーを起動しない
+- **クライアント挙動：**
+  - 通常のターンタイマー（右上）を停止し `--:--` で固定表示する
+  - `game-actions` 領域に「⏳ {userName} が切断中です。復帰を待っています…」のオーバーレイを表示する
+  - 行動選択UI（①〜⑥）は誰の画面にも表示しない（前手番プレイヤーの古い UI もクリアする）
+- **後続：**
+  - 1 分以内に切断中プレイヤーが再接続した場合、サーバーは通常の `GAME_STATE_SYNC` と `TURN_CHANGED { timeoutSeconds: 180 }` を送り直してオーバーレイを上書きする
+  - 1 分以内に再接続されなかった場合は `NOTIFY_PLAYER_DIED { cause: "DISCONNECTED" }` を送って死亡扱いとし、次の生存プレイヤーへ `TURN_CHANGED` で手番を移す
+
+```json
+{
+  "type": "WAITING_FOR_DISCONNECTED_PLAYER",
+  "payload": {
+    "playerId": "UUID",
+    "userName": "string",
+    "timeoutSeconds": 60
+  }
+}
+```
+
 #### SEATS_SWAPPED（座席入れ替え完了）
 
 - **送信先：** ルーム内の全プレイヤー

@@ -823,6 +823,19 @@
 - **手番外に切断が発生した場合：** 切断タイマー（1分）を開始。1分以内に復帰できなければ死亡扱い
 - 死亡扱いになったプレイヤーのリンゴはエンディングフェイズで公開される
 
+#### 切断中プレイヤーに手番が回ってきた場合
+
+- ターン進行ロジックは切断中プレイヤーを**スキップしない**。`currentTurnPlayerId` を切断中プレイヤーへ通常通り設定する
+- サーバーは通常のターンタイマー（3分）を**起動しない**。代わりに以下を行う：
+  1. `GAME_STATE_SYNC` を全員へ再送（`currentTurnPlayerId` を切断中プレイヤーに更新）
+  2. `TURN_CHANGED { currentTurnPlayerId, timeoutSeconds: 0 }` を全員へ送信（`timeoutSeconds: 0` は「切断中の手番」を示すマーカー）
+  3. `WAITING_FOR_DISCONNECTED_PLAYER { playerId, userName, timeoutSeconds: 60 }` を全員へ送信
+  4. 既存の切断タイマー（残り時間）を流用して 1 分後に死亡判定する
+- **全プレイヤーの画面：** 「⏳ {userName} が切断中です。復帰を待っています…」の待機オーバーレイを `game-actions` 領域に表示し、行動選択UI（①〜⑥）は誰の画面にも表示しない。右上のターンタイマーは `--:--` 固定表示にする
+- **復帰した場合：** `WAITING_FOR_DISCONNECTED_PLAYER` のオーバーレイは新しい `TURN_CHANGED`（180秒）と `GAME_STATE_SYNC` に上書きされ、対象プレイヤーが通常通り手番を開始する（タイマーは 3 分でリスタート）
+- **1 分以内に復帰しなかった場合：** 通常通り死亡扱いとし、`NOTIFY_PLAYER_DIED` 送信後、次の生存プレイヤーへ `TURN_CHANGED` で手番を移す
+- **前手番プレイヤーの UI クリア：** `TURN_CHANGED`／`GAME_STATE_SYNC` を受信したクライアントは、自分が前の手番プレイヤーであった場合でも行動選択UIを必ず非表示にする（次の手番プレイヤーが切断中等で操作不能であっても、前手番者の UI が残ってはならない）
+
 #### ゲーム中の切断（白雪姫）
 
 - 白雪姫が切断した場合も**1分（60秒）以内に再接続**した場合はゲームを続行する
@@ -837,6 +850,7 @@
 - 移譲が成立した場合、全員へ `HOST_TRANSFERRED { newHostPlayerId, newHostUserName, previousHostPlayerId, reason: "DISCONNECTED" }` を送信する
   - クライアントは自分が新ホストになったかを判定し、エンディング進行ボタン等のホスト専用 UI を更新する
   - 全員のログに「👑 ホスト権限が XXX に移譲されました（理由: DISCONNECTED）」を表示し、トースト通知も行う
+  - **ホスト操作待ち状態（`pendingProceedToReveal` / `pendingProceedToResult`）が残っている場合：** `HOST_TRANSFERRED` 直後に `WAITING_HOST_PROCEED { nextPhase }` を再ブロードキャストし、新ホストの画面に「エンディングに進む／結果画面に進む」ボタンを確実に表示する。同様に、ホスト操作待ち中にプレイヤーが再接続した場合も `WAITING_HOST_PROCEED` を再送する
 - **候補が見つからない場合（座席末尾までで誰も接続していない）：** 一周して元のホストへ戻すことはせず、ゲームを強制終了する
   - `NOTIFY_TIMEOUT { timeoutType: "NO_HOST_AVAILABLE", autoAction: "ホスト権限を持つプレイヤーが存在しません" }` を全員へ送信
   - 続けて `GAME_RESULT { winFaction: "NONE", reason: "NO_HOST_AVAILABLE", players: [...] }` を送信し、結果画面では「ホスト権限を持つプレイヤーが存在しません。ゲームを強制終了しました」と表示する

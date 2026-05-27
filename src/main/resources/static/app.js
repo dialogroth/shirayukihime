@@ -267,6 +267,9 @@ function handleServerEvent(msg) {
       state.waitingNextPhase = payload.nextPhase;
       showWaitingHostProceed(payload.nextPhase);
       break;
+    case 'WAITING_FOR_DISCONNECTED_PLAYER':
+      showWaitingForDisconnectedPlayer(payload);
+      break;
     case 'NOTIFY_THINK_TIME':
       log(`🤔 ${getPlayerName(payload.playerId)} が長考を使用しました（+2分）`);
       if (payload.playerId === state.playerId) state.thinkTimeUsed = true;
@@ -353,13 +356,14 @@ function handleGameStateSync(payload) {
     // Update actions if it's my turn
     if (payload.currentTurnPlayerId === state.playerId) {
       renderTurnActions();
-    } else if (state.myHand.length >= 2) {
-      // カードを引いた直後でSYNCが来た場合（currentTurnPlayerIdがまだ自分の場合も含む）
-      renderTurnActions();
     } else {
+      // 他人の手番：行動UIを必ずクリアする（前手番プレイヤーの古いUIが残らないように）
       const actionsEl = document.getElementById('game-actions');
       const turnPlayerName = getPlayerName(payload.currentTurnPlayerId);
-      actionsEl.innerHTML = `<div style="text-align:center;color:#aaa;padding:12px;">🕐 ${turnPlayerName} のターンです。お待ちください…</div>`;
+      // 切断中プレイヤーの待ち表示が出ている場合は上書きしない
+      if (!actionsEl.innerHTML.includes('復帰を待っています')) {
+        actionsEl.innerHTML = `<div style="text-align:center;color:#aaa;padding:12px;">🕐 ${turnPlayerName} のターンです。お待ちください…</div>`;
+      }
     }
   } else if (phase === 'ENDING_QUEEN') {
     // 女王でないプレイヤーに待機メッセージを表示（女王交換UIまたはホスト進行ボタン表示済みの場合は上書きしない）
@@ -383,14 +387,17 @@ function handleTurnChanged(payload) {
   // タイマー開始（エンディングフェーズ中は固定表示）
   const phase = state.gameState?.phase;
   const isEndingPhase = phase === 'ENDING_QUEEN' || phase === 'ENDING_REVEAL' || phase === 'FINISHED';
-  if (!isEndingPhase) {
+  // timeoutSeconds=0 は「切断中プレイヤーの手番」を示すサーバー側の合図。
+  // その場合は通常のターンタイマーを起動しない（直後に WAITING_FOR_DISCONNECTED_PLAYER が来る）。
+  const isDisconnectedTurn = (payload.timeoutSeconds === 0);
+  if (!isEndingPhase && !isDisconnectedTurn) {
     startTurnTimer(payload.timeoutSeconds || 180);
   }
 
   // 手札表示を更新（ゲーム開始直後の表示確保）
   renderMyHand();
 
-  if (!isEndingPhase) {
+  if (!isEndingPhase && !isDisconnectedTurn) {
     if (payload.currentTurnPlayerId === state.playerId) {
       renderTurnActions();
     } else {
@@ -958,6 +965,28 @@ function showWaitingHostProceed(targetPhase) {
     container.innerHTML = `<div style="width:100%;text-align:center;padding:16px;color:#aaa;">ホストの操作を待っています…</div>`;
   }
   log(`⏳ ${label}（ホスト操作待ち）`);
+}
+
+// === 切断中プレイヤーの手番待ち ===
+// 手番が回ってきたプレイヤーが切断中の場合、全員の画面に表示する。
+// 通常のターンタイマー(180秒)は止めて、復帰待ち状態であることを示す。
+function showWaitingForDisconnectedPlayer(payload) {
+  // 通常のターンタイマーは止める（タイマー表示は固定）
+  stopTurnTimer();
+  const el = document.getElementById('timer-label');
+  if (el) {
+    el.textContent = '⏱ --:--';
+    el.style.color = '#aaa';
+    el.style.fontWeight = '';
+  }
+  const container = document.getElementById('game-actions');
+  container.innerHTML = `
+    <div style="text-align:center;padding:16px;background:#2a1a1a;border:2px dashed #f59e0b;border-radius:8px;">
+      <div style="font-size:1rem;color:#f59e0b;font-weight:bold;margin-bottom:6px;">⏳ ${payload.userName} が切断中です</div>
+      <div style="font-size:0.85rem;color:#aaa;">復帰を待っています…（最大 ${payload.timeoutSeconds || 60} 秒）</div>
+    </div>
+  `;
+  log(`⏳ ${payload.userName} の手番ですが切断中です。復帰を待っています…`);
 }
 
 // === 白雪姫死亡の特殊演出 ===
